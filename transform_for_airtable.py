@@ -1,7 +1,7 @@
 import pandas as pd
 
 # Read the source data
-df = pd.read_csv('quarter_sales.csv')
+quarterly_sales = pd.read_csv('quarter_sales.csv')
 
 # Define chip types and their corresponding columns
 # H100 is the reference unit, so H100_quantity = H100e value
@@ -9,13 +9,14 @@ chip_mappings = [
     ('A100', 'A100_quantity', 'Total_A100_in_H100e'),
     ('H100', 'H100_quantity', 'H100_quantity'),
     ('H20', 'H20_quantity', 'Total_H20_in_H100e'),
-    ('GB200', 'GB200_quantity', 'Total_GB200_in_H100e'),
+    ('B200', 'B200_quantity', 'Total_B200_in_H100e'),
+    ('B300', 'B300_quantity', 'Total_B300_in_H100e'),
 ]
 
 # Create rows for output
 rows = []
 
-for _, row in df.iterrows():
+for _, row in quarterly_sales.iterrows():
     quarter = row['Quarter']
     start_date = row['Start Date']
     end_date = row['End Date']
@@ -52,3 +53,50 @@ output_df.to_csv(output_path, index=False)
 print(f"Transformed {len(rows)} rows")
 print("\nPreview:")
 print(output_df[['Name', 'Start date', 'End date', 'Compute estimate in H100e (median)', 'Chip type']].to_string())
+
+
+
+# Quarterly data by company
+
+quarterly_by_company = pd.read_csv('nvidia_quarterly_by_company.csv')
+
+# Create rows for output
+rows = []
+
+for _, row in quarterly_by_company.iterrows():
+    company = row['Company']
+    quarter = row['Quarter']
+    start_date = row['Start Date']
+    end_date = row['End Date']
+    h100e_median = row['h100_equivs_median']
+    h100e_10th = row['h100_equivs_10th']
+    h100e_90th = row['h100_equivs_90th']
+    
+    rows.append({
+        'Name': f"{company} - {quarter}",
+        'Compute owner': company,
+        'Designer': 'Nvidia',
+        'Start date': start_date,
+        'End date': end_date,
+        'Compute estimate in H100e (median)': h100e_median,
+        'Source / Link': '',
+        'Notes': '',
+        'Power estimate (TDP in GW)': '',
+        'Chip type': 'Nvidia (total)',
+        'CI': f"{int(h100e_10th)}-{int(h100e_90th)}",
+        'Last Modified By': '',
+        'Last Modified': '',
+        'Cost estimate (USD)': '',
+        'Select': ''
+    })
+
+# Create output dataframe
+output_df = pd.DataFrame(rows)
+
+# Save to CSV
+output_path = 'nvidia_quarterly_by_company_transformed.csv'
+output_df.to_csv(output_path, index=False)
+
+print(f"Transformed {len(rows)} rows")
+print("\nPreview:")
+print(output_df[['Name', 'Compute owner', 'Compute estimate in H100e (median)', 'CI', 'Chip type']].head(20).to_string())
