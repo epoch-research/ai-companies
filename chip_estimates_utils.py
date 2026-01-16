@@ -139,3 +139,55 @@ def print_cumulative_summary(cumulative, chip_specs, title="Cumulative Productio
     if grand_total is not None:
         print("-" * 45)
         print(f"{'TOTAL':<6} {int(np.percentile(grand_total, 5)):>12,} {int(np.percentile(grand_total, 50)):>12,} {int(np.percentile(grand_total, 95)):>12,}")
+
+
+def format_thousands(n):
+    """Format number as Xk (rounded to nearest thousand)."""
+    return f"{round(n / 1000)}k"
+
+
+def summarize_quarterly_by_chip(results, format_fn=format_thousands):
+    """
+    Create summary DataFrame with each chip type as separate columns with 90% CI.
+
+    Args:
+        results: dict of {quarter: {chip_type: list of samples}}
+                 Output from estimate_chip_sales()
+        format_fn: function to format numbers (default: format_thousands)
+
+    Returns:
+        DataFrame with Quarter, one column per chip type, and Total column.
+        Each cell shows "median (p5 - p95)".
+    """
+    # Infer quarters and chip types from results
+    quarters = list(results.keys())
+    chip_types = list(results[quarters[0]].keys())
+    n_samples = len(results[quarters[0]][chip_types[0]])
+
+    rows = []
+    for quarter in quarters:
+        row = {'Quarter': quarter}
+        total = np.zeros(n_samples)
+
+        for chip_type in chip_types:
+            arr = np.array(results[quarter][chip_type])
+            total += arr
+            if arr.sum() > 0:
+                p5 = format_fn(np.percentile(arr, 5))
+                p50 = format_fn(np.percentile(arr, 50))
+                p95 = format_fn(np.percentile(arr, 95))
+                row[chip_type] = f"{p50} ({p5}-{p95})"
+            else:
+                row[chip_type] = "-"
+
+        # Add total column
+        p5 = format_fn(np.percentile(total, 5))
+        p50 = format_fn(np.percentile(total, 50))
+        p95 = format_fn(np.percentile(total, 95))
+        row['Total'] = f"{p50} ({p5}-{p95})"
+
+        rows.append(row)
+
+    # Order columns: Quarter, chip types (in order), Total
+    cols = ['Quarter'] + chip_types + ['Total']
+    return pd.DataFrame(rows)[cols]
