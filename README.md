@@ -1,5 +1,5 @@
-# ai-companies
-Code for estimating compute quantities and other AI company data
+# ai-chip-counts
+Code for estimating total quantities of AI chips/compute
 
 See relevant data hub(s) on Epoch.ai for documentation
 
