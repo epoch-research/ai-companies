@@ -23,6 +23,8 @@ draw, tilted toward diversion (case-anchored, less sensitive to
 marketplace extrapolation).
 """
 
+import csv
+
 import numpy as np
 from scipy import stats
 
@@ -610,3 +612,230 @@ p5, p50, p95 = pct(combined_value_approx)
 print(f"  Value:  median ${p50/1e9:>10.1f}B  [${p5/1e9:>10.1f}B - ${p95/1e9:>10.1f}B]")
 
 print()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  CSV EXPORT — quarterly cumulative by chip type, [Owners] timelines format
+# ════════════════════════════════════════════════════════════════════════════
+# For each chip type (A100, H100, H200, B200), produces 8 cumulative rows
+# (one per quarter, 2024 Q1 through 2025 Q4). Plus 8 "Nvidia total" rows
+# summing across chip types per draw. Each row reports H100e (median, p5,
+# p95), chip count (median, p5, p95), and total TDP. Owner = "China(smuggled)".
+
+TDP = {"A100": 400, "H100": 700, "H200": 700, "B200": 1000}
+
+# 2024 quarterly weights — revenue ramp through the year
+Q24_FRACS = np.array([0.700, 0.913, 1.076, 1.312])
+Q24_FRACS = Q24_FRACS / Q24_FRACS.sum()
+
+# 2025 diversion quarterly weights — heavier mid-year (matches Liaw sprint timing)
+Q25_DIV_FRACS = np.array([0.18, 0.30, 0.28, 0.24])
+Q25_DIV_FRACS = Q25_DIV_FRACS / Q25_DIV_FRACS.sum()
+
+# Resale 2025 sub-period to calendar quarter: each row is the share of
+# pre-ban / ban / post-ban months falling in each calendar quarter.
+RP_PRE  = np.array([3.00/3.25, 0.25/3.25, 0,         0])
+RP_BAN  = np.array([0,         2.75/3.50, 0.75/3.50, 0])
+RP_POST = np.array([0,         0,         2.25/5.25, 3.00/5.25])
+
+# ── Diversion side: per-draw chip-count arrays by chip type and year ────
+# Observed (pre-scaling) chip counts. Diversion scaling applied later.
+
+# D1 Supermicro/Liaw: H100 + B200 by year
+d1_chips_2024 = d1_chips * d1_frac_2024
+d1_chips_2025 = d1_chips * (1 - d1_frac_2024)
+d1_b200_chips_2024 = d1_chips_2024 * d1_b200_2024
+d1_h100_chips_2024 = d1_chips_2024 * (1 - d1_b200_2024)
+d1_b200_chips_2025 = d1_chips_2025 * d1_b200_2025
+d1_h100_chips_2025 = d1_chips_2025 * (1 - d1_b200_2025)
+
+# D2 Megaspeed: B200 + H100, all 2025
+d2_b200_chips_2025 = d2_chips * d2_b200
+d2_h100_chips_2025 = d2_chips * (1 - d2_b200)
+
+# D3 Aperia: H100 + A100 by year
+d3_chips_2024 = d3_chips * d3_frac_2024
+d3_chips_2025 = d3_chips * (1 - d3_frac_2024)
+d3_h100_chips_2024 = d3_chips_2024 * d3_h100_frac
+d3_a100_chips_2024 = d3_chips_2024 * (1 - d3_h100_frac)
+d3_h100_chips_2025 = d3_chips_2025 * d3_h100_frac
+d3_a100_chips_2025 = d3_chips_2025 * (1 - d3_h100_frac)
+
+# D4 Li Ming: H100 by year
+d4_h100_chips_2024 = d4_chips * d4_frac_2024
+d4_h100_chips_2025 = d4_chips * (1 - d4_frac_2024)
+
+# D5 Gatekeeper: H100 + H200 by year
+d5_h100_chips_2024 = d5_h100_chips * d5_frac_2024
+d5_h100_chips_2025 = d5_h100_chips * (1 - d5_frac_2024)
+d5_h200_chips_2024 = d5_h200_chips * d5_frac_2024
+d5_h200_chips_2025 = d5_h200_chips * (1 - d5_frac_2024)
+
+# D6 Janford: A100 by year
+d6_a100_chips_2024 = d6_chips * d6_frac_2024
+d6_a100_chips_2025 = d6_chips * (1 - d6_frac_2024)
+
+# D7 Other small: H100 by year
+d7_h100_chips_2024 = d7_chips * d7_frac_2024
+d7_h100_chips_2025 = d7_chips * (1 - d7_frac_2024)
+
+# D8 ALX: H100 + H200 by year
+d8_h100_chips_2024 = d8_h100_chips * d8_frac_2024
+d8_h100_chips_2025 = d8_h100_chips * (1 - d8_frac_2024)
+d8_h200_chips_2024 = d8_h200_chips * d8_frac_2024
+d8_h200_chips_2025 = d8_h200_chips * (1 - d8_frac_2024)
+
+# D9 William+Mike: H100, all 2024
+d9_h100_chips_2024 = d9_william_chips + d9_mike_chips
+
+# Aggregate observed chip counts by type and year
+div_2024_observed = {
+    "A100": d3_a100_chips_2024 + d6_a100_chips_2024,
+    "H100": (d1_h100_chips_2024 + d3_h100_chips_2024 + d4_h100_chips_2024
+             + d5_h100_chips_2024 + d7_h100_chips_2024 + d8_h100_chips_2024
+             + d9_h100_chips_2024),
+    "H200": d5_h200_chips_2024 + d8_h200_chips_2024,
+    "B200": d1_b200_chips_2024,
+}
+div_2025_observed = {
+    "A100": d3_a100_chips_2025 + d6_a100_chips_2025,
+    "H100": (d1_h100_chips_2025 + d2_h100_chips_2025 + d3_h100_chips_2025
+             + d4_h100_chips_2025 + d5_h100_chips_2025 + d7_h100_chips_2025
+             + d8_h100_chips_2025),
+    "H200": d5_h200_chips_2025 + d8_h200_chips_2025,
+    "B200": d1_b200_chips_2025 + d2_b200_chips_2025,
+}
+
+# ── Resale side: per-draw chip-count arrays by chip type and period ─────
+res_2024_h100 = resale_2024_chips * _r24_h100_frac
+res_2024_a100 = resale_2024_chips * (1 - _r24_h100_frac)
+
+res_pre_b200  = resale_pre  * _b200_pre
+res_pre_h100  = resale_pre  * (1 - _b200_pre)
+res_ban_b200  = resale_ban  * _b200_ban
+res_ban_h100  = resale_ban  * (1 - _b200_ban)
+res_post_b200 = resale_post * _b200_ban
+res_post_h100 = resale_post * (1 - _b200_ban)
+
+res_scale = 1.0 / marketplace_fraction
+# diversion_scale (= diversion_accuracy / diversion_detection) defined above
+
+# ── Combine into per-quarter chip-count arrays by chip type ─────────────
+# Use the same 60/40 diversion/resale blend as the headline combined estimate.
+chip_types = ["A100", "H100", "H200", "B200"]
+quarterly = {ct: [None]*8 for ct in chip_types}
+
+for ct in chip_types:
+    div_y24 = div_2024_observed[ct]
+    div_y25 = div_2025_observed[ct]
+    # 2024 quarters
+    for qi in range(4):
+        div_q = div_y24 * Q24_FRACS[qi] * diversion_scale
+        if ct == "H100":
+            res_q = res_2024_h100 * Q24_FRACS[qi] * res_scale
+        elif ct == "A100":
+            res_q = res_2024_a100 * Q24_FRACS[qi] * res_scale
+        else:
+            res_q = np.zeros_like(div_q)
+        quarterly[ct][qi] = w_diversion * div_q + (1 - w_diversion) * res_q
+    # 2025 quarters
+    for qi in range(4):
+        div_q = div_y25 * Q25_DIV_FRACS[qi] * diversion_scale
+        if ct == "B200":
+            res_q = (res_pre_b200  * RP_PRE[qi]
+                   + res_ban_b200  * RP_BAN[qi]
+                   + res_post_b200 * RP_POST[qi]) * res_scale
+        elif ct == "H100":
+            res_q = (res_pre_h100  * RP_PRE[qi]
+                   + res_ban_h100  * RP_BAN[qi]
+                   + res_post_h100 * RP_POST[qi]) * res_scale
+        else:
+            res_q = np.zeros_like(div_q)
+        quarterly[ct][qi + 4] = w_diversion * div_q + (1 - w_diversion) * res_q
+
+# Cumulate across quarters
+cumulative = {ct: [None]*8 for ct in chip_types}
+for ct in chip_types:
+    running = np.zeros_like(quarterly[ct][0])
+    for qi in range(8):
+        running = running + quarterly[ct][qi]
+        cumulative[ct][qi] = running.copy()
+
+# ── Write CSV ───────────────────────────────────────────────────────────
+end_dates = ["3/31/2024", "6/30/2024", "9/30/2024", "12/31/2024",
+             "3/31/2025", "6/30/2025", "9/30/2025", "12/31/2025"]
+q_labels  = ["Q1 2024", "Q2 2024", "Q3 2024", "Q4 2024",
+             "Q1 2025", "Q2 2025", "Q3 2025", "Q4 2025"]
+
+header = ["Name", "Chip manufacturer", "Owner", "Chip type",
+          "Start date", "End date",
+          "Compute estimate in H100e (median)",
+          "H100e (5th percentile)", "H100e (95th percentile)",
+          "Number of Units (median)",
+          "Number of Units (5th percentile)",
+          "Number of Units (95th percentile)",
+          "Source / Link", "Notes",
+          "Last Modified By", "Last Modified", "Incomplete", "Created",
+          "Total TDP (W)", "Total TDP (W) (5th percentile)",
+          "Total TDP (W) (95th percentile)", "Last Modified 2"]
+
+note = "Estimates from Epoch AI Monte Carlo model of compute smuggled to China (diversion + resale, 60/40 weighted)."
+source = "https://docs.google.com/document/d/184mWLWpPNQkiLZDpAm82A-D9jgUpBnyEI9DpRoMgQNM"
+
+rows = []
+for ct in chip_types:
+    for qi in range(8):
+        chips = cumulative[ct][qi]
+        c5, c50, c95 = pct(chips)
+        h5, h50, h95 = c5*H100E[ct], c50*H100E[ct], c95*H100E[ct]
+        t5, t50, t95 = c5*TDP[ct], c50*TDP[ct], c95*TDP[ct]
+        name = f"China(smuggled) {ct} cumulative through {q_labels[qi]}"
+        rows.append([
+            name, "Nvidia", "China(smuggled)", ct,
+            "1/1/2024", end_dates[qi],
+            round(h50), round(h5), round(h95),
+            round(c50), round(c5), round(c95),
+            source, note,
+            "", "", "", "",
+            round(t50), round(t5), round(t95), ""
+        ])
+
+# Nvidia total: per-draw sums across chip types so percentiles capture
+# joint variation correctly (sum-of-medians ≠ median-of-sum for skewed dists).
+for qi in range(8):
+    total_chips_arr = sum(cumulative[ct][qi] for ct in chip_types)
+    total_h100e_arr = sum(cumulative[ct][qi] * H100E[ct] for ct in chip_types)
+    total_tdp_arr   = sum(cumulative[ct][qi] * TDP[ct]   for ct in chip_types)
+    c5, c50, c95 = pct(total_chips_arr)
+    h5, h50, h95 = pct(total_h100e_arr)
+    t5, t50, t95 = pct(total_tdp_arr)
+    name = f"China(smuggled) Nvidia total cumulative through {q_labels[qi]}"
+    rows.append([
+        name, "Nvidia", "China(smuggled)", "Nvidia total",
+        "1/1/2024", end_dates[qi],
+        round(h50), round(h5), round(h95),
+        round(c50), round(c5), round(c95),
+        source, note,
+        "", "", "", "",
+        round(t50), round(t5), round(t95), ""
+    ])
+
+out_path = "China_smuggled_cumulative_by_chip_type.csv"
+with open(out_path, "w", newline="", encoding="utf-8") as f:
+    w = csv.writer(f)
+    w.writerow(header)
+    w.writerows(rows)
+print(f"Wrote {out_path} ({len(rows)} rows)")
+
+# Summary
+print()
+print(f"{'Chip':<14}  {'Quarter':<14}  {'H100e (median)':>16}  {'Chips (median)':>16}")
+print("-" * 68)
+for ct in chip_types:
+    chips = cumulative[ct][7]
+    c5, c50, c95 = pct(chips)
+    print(f"{ct:<14}  {'2025 Q4 cumul':<14}  {c50*H100E[ct]:>16,.0f}  {c50:>16,.0f}")
+total_chips_q4 = sum(cumulative[ct][7] for ct in chip_types)
+total_h100e_q4 = sum(cumulative[ct][7] * H100E[ct] for ct in chip_types)
+print(f"{'Nvidia total':<14}  {'2025 Q4 cumul':<14}  "
+      f"{np.median(total_h100e_q4):>16,.0f}  {np.median(total_chips_q4):>16,.0f}")
