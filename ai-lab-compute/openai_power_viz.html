@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OpenAI Power Model — Interactive Visualization</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #d4d4d4;
+    --card: #fff;
+    --accent: #10a37f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.45;
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  h2 { margin: 0 0 6px; font-size: 17px; }
+  .sub { color: var(--muted); margin-bottom: 24px; font-size: 13px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px;
+    margin-bottom: 24px;
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 22px;
+    align-items: center;
+    margin: 8px 0 14px;
+    font-size: 13px;
+  }
+  .control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .control-group label.title {
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .control-group .opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+  }
+  select {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 13px;
+    background: white;
+  }
+  .plot { width: 100%; height: 520px; }
+  .footer {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 12px;
+  }
+  details {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  details summary { cursor: pointer; }
+</style>
+</head>
+<body>
+
+<h1>OpenAI Power Model — Interactive Visualization</h1>
+<div class="sub">
+  Estimated OpenAI compute (H100-equivalents) derived from total IT power and
+  Microsoft's incremental fleet mix. Median estimates only.
+</div>
+
+<!-- ====================== CHART 1: TRENDLINE ====================== -->
+<div class="card">
+  <h2>OpenAI vs Microsoft &amp; Meta — Cumulative compute (H100e)</h2>
+  <div class="sub">
+    Microsoft and Meta show Nvidia-only quarterly totals. OpenAI is interpolated
+    exponentially between the three year-end anchor points.
+  </div>
+
+  <div class="controls">
+    <div class="control-group">
+      <label class="title">Y-axis:</label>
+      <label class="opt"><input type="radio" name="trend-scale" value="linear" checked> Linear</label>
+      <label class="opt"><input type="radio" name="trend-scale" value="log"> Log</label>
+    </div>
+
+    <div class="control-group">
+      <label class="title">OpenAI delay scenario:</label>
+      <select id="trend-scenario">
+        <option value="no_delay">No delay (baseline)</option>
+        <option value="1q_delay" selected>1-quarter delay</option>
+        <option value="2q_delay">2-quarter delay</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label class="title">Shift Microsoft/Meta sales by:</label>
+      <select id="trend-shift">
+        <option value="0" selected>0 (sales date)</option>
+        <option value="3">+1 quarter (3 months)</option>
+        <option value="6">+2 quarters (6 months)</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="trend-plot" class="plot"></div>
+
+  <details>
+    <summary>About the deployment-delay shift</summary>
+    Nvidia revenue recognition reflects when chips are sold, not when they're
+    operational. Shifting Microsoft/Meta's curves to the right approximates when
+    those chips actually came online in data centers — a more apples-to-apples
+    comparison with OpenAI's IT-power-based estimate.
+  </details>
+</div>
+
+<!-- ====================== CHART 2: BAR — TOTAL H100e ====================== -->
+<div class="card">
+  <h2>OpenAI total H100e by year</h2>
+  <div class="sub">Bars stacked by chip type (or chip family). Hover for details.</div>
+
+  <div class="controls">
+    <div class="control-group">
+      <label class="title">Y-axis:</label>
+      <label class="opt"><input type="radio" name="bar-scale" value="linear" checked> Linear</label>
+      <label class="opt"><input type="radio" name="bar-scale" value="log"> Log</label>
+    </div>
+
+    <div class="control-group">
+      <label class="title">Group by:</label>
+      <label class="opt"><input type="radio" name="bar-group" value="chip" checked> Chip type</label>
+      <label class="opt"><input type="radio" name="bar-group" value="family"> Chip family</label>
+    </div>
+
+    <div class="control-group">
+      <label class="title">Show scenarios:</label>
+      <label class="opt"><input type="checkbox" name="bar-scen" value="no_delay" checked> No delay</label>
+      <label class="opt"><input type="checkbox" name="bar-scen" value="1q_delay" checked> 1Q delay</label>
+      <label class="opt"><input type="checkbox" name="bar-scen" value="2q_delay" checked> 2Q delay</label>
+    </div>
+  </div>
+
+  <div id="bar-plot" class="plot"></div>
+</div>
+
+<!-- ====================== CHART 3: BAR — CHIP COUNTS ====================== -->
+<div class="card">
+  <h2>OpenAI chip counts by year</h2>
+  <div class="sub">Estimated number of physical GPUs OpenAI is operating, by chip type.</div>
+
+  <div class="controls">
+    <div class="control-group">
+      <label class="title">Y-axis:</label>
+      <label class="opt"><input type="radio" name="cnt-scale" value="linear" checked> Linear</label>
+      <label class="opt"><input type="radio" name="cnt-scale" value="log"> Log</label>
+    </div>
+
+    <div class="control-group">
+      <label class="title">Delay scenario:</label>
+      <select id="cnt-scenario">
+        <option value="no_delay">No delay (baseline)</option>
+        <option value="1q_delay" selected>1-quarter delay</option>
+        <option value="2q_delay">2-quarter delay</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="cnt-plot" class="plot"></div>
+</div>
+
+<div class="footer">
+  Generated from <code>openai_power_model.ipynb</code>. Microsoft/Meta totals
+  cover Nvidia chips only (no internal silicon). No chip retirements assumed.
+</div>
+
+<script>
+const DATA = {"openai": {"no_delay": {"label": "No delay (baseline)", "by_date": {"2023-12-31": {"chips": {"A100": 84540, "H100/H200": 87628, "B200": 0, "B300": 0}, "h100e": {"A100": 26656, "H100/H200": 87628, "B200": 0, "B300": 0}, "total_h100e": 114284}, "2024-12-31": {"chips": {"A100": 84540, "H100/H200": 344312, "B200": 20867, "B300": 0}, "h100e": {"A100": 26656, "H100/H200": 344312, "B200": 52721, "B300": 0}, "total_h100e": 423689}, "2025-12-31": {"chips": {"A100": 84540, "H100/H200": 471301, "B200": 311653, "B300": 233081}, "h100e": {"A100": 26656, "H100/H200": 471301, "B200": 787400, "B300": 588887}, "total_h100e": 1874244}}}, "1q_delay": {"label": "1-quarter delay (3 months)", "by_date": {"2023-12-31": {"chips": {"A100": 112321, "H100/H200": 69108, "B200": 0, "B300": 0}, "h100e": {"A100": 35416, "H100/H200": 69108, "B200": 0, "B300": 0}, "total_h100e": 104524}, "2024-12-31": {"chips": {"A100": 114316, "H100/H200": 355755, "B200": 0, "B300": 0}, "h100e": {"A100": 36045, "H100/H200": 355755, "B200": 0, "B300": 0}, "total_h100e": 391800}, "2025-12-31": {"chips": {"A100": 114316, "H100/H200": 634707, "B200": 294176, "B300": 134909}, "h100e": {"A100": 36045, "H100/H200": 634707, "B200": 743245, "B300": 340851}, "total_h100e": 1754848}}}, "2q_delay": {"label": "2-quarter delay (6 months)", "by_date": {"2023-12-31": {"chips": {"A100": 146054, "H100/H200": 46619, "B200": 0, "B300": 0}, "h100e": {"A100": 46052, "H100/H200": 46619, "B200": 0, "B300": 0}, "total_h100e": 92671}, "2024-12-31": {"chips": {"A100": 157594, "H100/H200": 326903, "B200": 0, "B300": 0}, "h100e": {"A100": 49691, "H100/H200": 326903, "B200": 0, "B300": 0}, "total_h100e": 376594}, "2025-12-31": {"chips": {"A100": 157594, "H100/H200": 795621, "B200": 263514, "B300": 45027}, "h100e": {"A100": 49691, "H100/H200": 795621, "B200": 665776, "B300": 113763}, "total_h100e": 1624851}}}}, "competitors": {"Microsoft": [{"date": "2022-03-31", "h100e": 14769}, {"date": "2022-06-30", "h100e": 30865}, {"date": "2022-09-30", "h100e": 47541}, {"date": "2022-12-31", "h100e": 64918}, {"date": "2023-03-31", "h100e": 85344}, {"date": "2023-06-30", "h100e": 131832}, {"date": "2023-09-30", "h100e": 207410}, {"date": "2023-12-31", "h100e": 306912}, {"date": "2024-03-31", "h100e": 440549}, {"date": "2024-06-30", "h100e": 605725}, {"date": "2024-09-30", "h100e": 805362}, {"date": "2024-12-31", "h100e": 1128599}, {"date": "2025-03-31", "h100e": 1554375}, {"date": "2025-06-30", "h100e": 2004678}, {"date": "2025-09-30", "h100e": 2539426}, {"date": "2025-12-31", "h100e": 3144234}], "Meta": [{"date": "2022-03-31", "h100e": 7759}, {"date": "2022-06-30", "h100e": 16161}, {"date": "2022-09-30", "h100e": 24754}, {"date": "2022-12-31", "h100e": 33880}, {"date": "2023-03-31", "h100e": 44615}, {"date": "2023-06-30", "h100e": 69188}, {"date": "2023-09-30", "h100e": 108807}, {"date": "2023-12-31", "h100e": 161070}, {"date": "2024-03-31", "h100e": 232503}, {"date": "2024-06-30", "h100e": 319074}, {"date": "2024-09-30", "h100e": 424416}, {"date": "2024-12-31", "h100e": 605007}, {"date": "2025-03-31", "h100e": 862721}, {"date": "2025-06-30", "h100e": 1132410}, {"date": "2025-09-30", "h100e": 1459060}, {"date": "2025-12-31", "h100e": 1839930}]}, "chip_types": ["A100", "H100/H200", "B200", "B300"], "openai_dates": ["2023-12-31", "2024-12-31", "2025-12-31"]};
+
+const CHIP_COLORS = {
+  "A100": "#8b5cf6",
+  "H100/H200": "#76b900",
+  "B200": "#1a73e8",
+  "B300": "#e8710a"
+};
+const CHIP_DISPLAY = {
+  "A100": "A100",
+  "H100/H200": "H100/H200",
+  "B200": "B200 (GB200)",
+  "B300": "B300 (GB300)"
+};
+const FAMILY_OF = {
+  "A100": "Ampere",
+  "H100/H200": "Hopper",
+  "B200": "Blackwell",
+  "B300": "Blackwell"
+};
+const FAMILY_COLORS = {
+  "Ampere": "#8b5cf6",
+  "Hopper": "#76b900",
+  "Blackwell": "#1a73e8"
+};
+const FAMILY_ORDER = ["Ampere", "Hopper", "Blackwell"];
+
+const COMPETITOR_COLORS = {
+  "Microsoft": "#f25022",
+  "Meta": "#1877f2",
+  "OpenAI": "#10a37f"
+};
+
+const fmt = (n) => n.toLocaleString(undefined, {maximumFractionDigits: 0});
+const fmtK = (n) => (n / 1000).toLocaleString(undefined, {maximumFractionDigits: 0}) + "k";
+
+function shiftDateMonths(dateStr, months) {
+  // dateStr is YYYY-MM-DD
+  const [y, m, d] = dateStr.split("-").map(Number);
+  // Use UTC to avoid timezone ambiguity
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCMonth(dt.getUTCMonth() + months);
+  return dt.toISOString().slice(0, 10);
+}
+
+function dateRange(startStr, endStr, n) {
+  const start = Date.UTC(...startStr.split("-").map((v, i) => i === 1 ? Number(v) - 1 : Number(v)));
+  const end = Date.UTC(...endStr.split("-").map((v, i) => i === 1 ? Number(v) - 1 : Number(v)));
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = start + (end - start) * i / (n - 1);
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+function expSegment(d1, y1, d2, y2, n = 60) {
+  const t1 = Date.parse(d1);
+  const t2 = Date.parse(d2);
+  const k = Math.log(y2 / y1) / (t2 - t1);
+  const dates = [];
+  const ys = [];
+  for (let i = 0; i < n; i++) {
+    const t = t1 + (t2 - t1) * i / (n - 1);
+    dates.push(new Date(t).toISOString().slice(0, 10));
+    ys.push(y1 * Math.exp(k * (t - t1)));
+  }
+  return {dates, ys};
+}
+
+// ---------------------------------------------------------------
+// CHART 1: Trendline
+// ---------------------------------------------------------------
+function renderTrend() {
+  const scale = document.querySelector('input[name="trend-scale"]:checked').value;
+  const scenario = document.getElementById("trend-scenario").value;
+  const shift = parseInt(document.getElementById("trend-shift").value, 10);
+
+  const traces = [];
+
+  // Microsoft & Meta (shifted)
+  for (const owner of ["Microsoft", "Meta"]) {
+    const series = DATA.competitors[owner];
+    const x = series.map(p => shiftDateMonths(p.date, shift));
+    const y = series.map(p => p.h100e);
+    traces.push({
+      x, y,
+      mode: "lines+markers",
+      name: owner + " (Nvidia)" + (shift ? ` +${shift / 3}Q` : ""),
+      line: {color: COMPETITOR_COLORS[owner], width: 2},
+      marker: {size: 6},
+      hovertemplate: `<b>${owner}</b><br>%{x}<br>H100e: %{y:,.0f}<extra></extra>`
+    });
+  }
+
+  // OpenAI: anchors + exponential interpolation between them
+  const oaiByDate = DATA.openai[scenario].by_date;
+  const anchorDates = DATA.openai_dates;
+  const anchorY = anchorDates.map(d => oaiByDate[d].total_h100e);
+
+  const interpX = [];
+  const interpY = [];
+  for (let i = 0; i < anchorDates.length - 1; i++) {
+    const seg = expSegment(anchorDates[i], anchorY[i], anchorDates[i + 1], anchorY[i + 1]);
+    if (i > 0) { seg.dates.shift(); seg.ys.shift(); }
+    interpX.push(...seg.dates);
+    interpY.push(...seg.ys);
+  }
+
+  traces.push({
+    x: interpX, y: interpY,
+    mode: "lines",
+    name: `OpenAI (${DATA.openai[scenario].label}, exp. interp.)`,
+    line: {color: COMPETITOR_COLORS.OpenAI, width: 3},
+    hovertemplate: `<b>OpenAI</b> (interpolated)<br>%{x}<br>H100e: %{y:,.0f}<extra></extra>`
+  });
+
+  traces.push({
+    x: anchorDates, y: anchorY,
+    mode: "markers+text",
+    name: "OpenAI anchors",
+    marker: {color: COMPETITOR_COLORS.OpenAI, size: 11, line: {color: "white", width: 2}},
+    text: anchorY.map(v => fmtK(v)),
+    textposition: "bottom center",
+    textfont: {color: COMPETITOR_COLORS.OpenAI, size: 11},
+    showlegend: false,
+    hovertemplate: "<b>OpenAI anchor</b><br>%{x}<br>H100e: %{y:,.0f}<extra></extra>"
+  });
+
+  const layout = {
+    margin: {l: 70, r: 20, t: 10, b: 50},
+    hovermode: "closest",
+    xaxis: {title: "Date", gridcolor: "#eee"},
+    yaxis: {
+      title: "Cumulative H100-equivalents",
+      type: scale,
+      gridcolor: "#eee",
+      tickformat: ",.0f",
+      ...(scale === "log" ? {
+        dtick: 1,
+        minor: {dtick: "D1", showgrid: true, gridcolor: "#f3f3f3", ticks: ""}
+      } : {})
+    },
+    legend: {x: 0.01, y: 0.99, bgcolor: "rgba(255,255,255,0.85)"},
+    plot_bgcolor: "white",
+    paper_bgcolor: "white"
+  };
+
+  Plotly.react("trend-plot", traces, layout, {responsive: true, displaylogo: false});
+}
+
+// ---------------------------------------------------------------
+// CHART 2: Total H100e bar chart by year × scenario
+// ---------------------------------------------------------------
+function renderBar() {
+  const scale = document.querySelector('input[name="bar-scale"]:checked').value;
+  const grouping = document.querySelector('input[name="bar-group"]:checked').value;
+  const activeScenarios = Array.from(document.querySelectorAll('input[name="bar-scen"]:checked'))
+    .map(el => el.value);
+
+  if (activeScenarios.length === 0) {
+    Plotly.react("bar-plot", [], {annotations: [{text: "Select at least one scenario", showarrow: false}]});
+    return;
+  }
+
+  const dates = DATA.openai_dates;
+  // x-axis groups by year; bars within a group are scenarios
+  const xLabels = [];
+  const scenarioPerBar = [];
+  for (const d of dates) {
+    for (const s of activeScenarios) {
+      xLabels.push(d.slice(0, 4)); // year
+      scenarioPerBar.push(s);
+    }
+  }
+
+  // For grouped-on-x via shared x label, use offsetgroup per scenario
+  const traces = [];
+
+  if (grouping === "chip") {
+    for (const chip of DATA.chip_types) {
+      for (const s of activeScenarios) {
+        const xs = dates.map(d => d.slice(0, 4));
+        const ys = dates.map(d => DATA.openai[s].by_date[d].h100e[chip]);
+        traces.push({
+          type: "bar",
+          x: xs,
+          y: ys,
+          name: `${CHIP_DISPLAY[chip]}`,
+          legendgroup: chip,
+          showlegend: s === activeScenarios[0],
+          offsetgroup: s,
+          marker: {color: CHIP_COLORS[chip]},
+          customdata: xs.map(() => DATA.openai[s].label),
+          hovertemplate: `<b>${CHIP_DISPLAY[chip]}</b><br>` +
+                         `%{customdata}<br>` +
+                         `Year: %{x}<br>` +
+                         `H100e: %{y:,.0f}<extra></extra>`
+        });
+      }
+    }
+  } else {
+    // family
+    const familyChips = {Ampere: ["A100"], Hopper: ["H100/H200"], Blackwell: ["B200", "B300"]};
+    for (const fam of FAMILY_ORDER) {
+      for (const s of activeScenarios) {
+        const xs = dates.map(d => d.slice(0, 4));
+        const ys = dates.map(d => familyChips[fam].reduce((a, c) => a + DATA.openai[s].by_date[d].h100e[c], 0));
+        traces.push({
+          type: "bar",
+          x: xs,
+          y: ys,
+          name: fam,
+          legendgroup: fam,
+          showlegend: s === activeScenarios[0],
+          offsetgroup: s,
+          marker: {color: FAMILY_COLORS[fam]},
+          customdata: xs.map(() => DATA.openai[s].label),
+          hovertemplate: `<b>${fam}</b><br>` +
+                         `%{customdata}<br>` +
+                         `Year: %{x}<br>` +
+                         `H100e: %{y:,.0f}<extra></extra>`
+        });
+      }
+    }
+  }
+
+  // Add scenario labels under each x group
+  const annotations = [];
+  if (activeScenarios.length > 1) {
+    const scenLabel = {no_delay: "No delay", "1q_delay": "1Q delay", "2q_delay": "2Q delay"};
+    // Plotly stack-grouping with offsetgroup needs xaxis "group" mode for offsets
+    // We'll show scenario in hover and as a separate xaxis tick
+  }
+
+  const layout = {
+    barmode: "stack",
+    margin: {l: 70, r: 20, t: 10, b: 60},
+    xaxis: {title: "Year", gridcolor: "#eee"},
+    yaxis: {
+      title: "Cumulative H100e",
+      type: scale,
+      gridcolor: "#eee",
+      tickformat: ",.0f",
+      ...(scale === "log" ? {
+        dtick: 1,
+        minor: {dtick: "D1", showgrid: true, gridcolor: "#f3f3f3", ticks: ""}
+      } : {})
+    },
+    legend: {x: 0.01, y: 0.99, bgcolor: "rgba(255,255,255,0.85)"},
+    plot_bgcolor: "white",
+    paper_bgcolor: "white",
+    bargap: 0.15,
+    bargroupgap: 0.05
+  };
+
+  Plotly.react("bar-plot", traces, layout, {responsive: true, displaylogo: false});
+}
+
+// ---------------------------------------------------------------
+// CHART 3: Chip counts by year
+// ---------------------------------------------------------------
+function renderCounts() {
+  const scale = document.querySelector('input[name="cnt-scale"]:checked').value;
+  const scenario = document.getElementById("cnt-scenario").value;
+
+  const dates = DATA.openai_dates;
+  const traces = DATA.chip_types.map(chip => ({
+    type: "bar",
+    x: dates.map(d => d.slice(0, 4)),
+    y: dates.map(d => DATA.openai[scenario].by_date[d].chips[chip]),
+    name: CHIP_DISPLAY[chip],
+    marker: {color: CHIP_COLORS[chip]},
+    hovertemplate: `<b>${CHIP_DISPLAY[chip]}</b><br>Year: %{x}<br>Chips: %{y:,.0f}<extra></extra>`
+  }));
+
+  const layout = {
+    barmode: "stack",
+    margin: {l: 70, r: 20, t: 10, b: 50},
+    xaxis: {title: "Year", gridcolor: "#eee"},
+    yaxis: {
+      title: "Number of GPUs",
+      type: scale,
+      gridcolor: "#eee",
+      tickformat: ",.0f",
+      ...(scale === "log" ? {
+        dtick: 1,
+        minor: {dtick: "D1", showgrid: true, gridcolor: "#f3f3f3", ticks: ""}
+      } : {})
+    },
+    legend: {x: 0.01, y: 0.99, bgcolor: "rgba(255,255,255,0.85)"},
+    plot_bgcolor: "white",
+    paper_bgcolor: "white"
+  };
+
+  Plotly.react("cnt-plot", traces, layout, {responsive: true, displaylogo: false});
+}
+
+// ---------------------------------------------------------------
+// Wire up controls
+// ---------------------------------------------------------------
+function wireControls() {
+  document.querySelectorAll('input[name="trend-scale"]').forEach(el => el.addEventListener("change", renderTrend));
+  document.getElementById("trend-scenario").addEventListener("change", renderTrend);
+  document.getElementById("trend-shift").addEventListener("change", renderTrend);
+
+  document.querySelectorAll('input[name="bar-scale"]').forEach(el => el.addEventListener("change", renderBar));
+  document.querySelectorAll('input[name="bar-group"]').forEach(el => el.addEventListener("change", renderBar));
+  document.querySelectorAll('input[name="bar-scen"]').forEach(el => el.addEventListener("change", renderBar));
+
+  document.querySelectorAll('input[name="cnt-scale"]').forEach(el => el.addEventListener("change", renderCounts));
+  document.getElementById("cnt-scenario").addEventListener("change", renderCounts);
+}
+
+wireControls();
+renderTrend();
+renderBar();
+renderCounts();
+</script>
+</body>
+</html>
