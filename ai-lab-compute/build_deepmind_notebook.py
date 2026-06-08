@@ -81,9 +81,13 @@ def summary(name, samples):
 md(r"""## 1. Total Google owned H100e
 
 Lognormal fits to the dashboard 90% CIs. The Nvidia and TPU fleets are drawn
-independently, so an unlucky Nvidia quarter need not coincide with an unlucky
-TPU quarter. (There's a concern the reported TPU CI is too tight; rather than
-bake that into the base case, we test it in the sensitivity check at the end.)""")
+independently. This is a simplified assumption, there are arguments for why they might
+   be correlated (we're generally off about total (Google) H100e) or anti-correlated 
+   (Google GPU purchases trade off with TPU purchases, Broadcom's supply chain allocations trade
+   off with Nvidia's, etc).
+   
+Distributions are taken from AI Chip Owners/Sales, though subjectively I think
+   the CIs are too narrow.""")
 
 code("""nvidia_owned = sq.to(955 * K, 1.59 * M)   # median ~1.24M
 google_owned = sq.to(3.08 * M, 4.54 * M)  # median ~3.74M
@@ -125,18 +129,28 @@ summary("Cloud share of Google ML compute", cloud_share_samples);""")
 # ---------------------------------------------------------------------------
 md(r"""## 4 & 5. DeepMind's share of each half
 
-- **Cloud half:** enterprise Gemini inference is "probably under 1M H100e"
-  against a cloud half of ~1.6–2M, so the share is well under 0.5. Lognormal
-  over 0.25–0.55 (left bound raised from 0.15 — a share that low looked
-  implausible), median ~0.37.
+- **Cloud half:** This includes GPU and TPU rentals to 
+   external customers, e.g. Anthropic, and enterprise Gemini inference. 
+  As of the end of 2025, enterprise Gemini inference
+   was likely less than OpenAI or Anthropic inference, i.e. probably under 1M H100e,
+  against a cloud half of ~1.6–2M, so the share is likely under 0.5. 
+   
+  Lognormal over 0.2–0.6, median ~0.35.
 - **Non-cloud half:** splits between DeepMind-related work (consumer Gemini
   inference, DM R&D/training) and other internal workloads (recommenders ~1M,
-  Waymo, etc.). DeepMind can plausibly be *more than half* of internal compute
-  even though it's less than half of Google's total — the earlier "non-DeepMind
-  internal is larger" note was a comparison against DeepMind's *cloud-side*
-  compute, not a ceiling on this share. Lognormal over 0.33–0.75, median ~0.50.""")
+  Waymo, etc.). Lognormal over 1/3 and 3/4, which leads to a median and mean
+   of around 50%. __This is a pretty vibe-sy guess and should not be taken literally__. 
+   Why not lower? Qualitatively, DeepMind is likely a top priority for Google's AI compute, 
+   and DeepMind R&D is likely roughly as well-provisioned as other leading labs like OpenAI (~1.5 to 2M H100e ). 
+   Why not higher? Recommender systems are highly lucrative since they boost Google's 200B ads business, 
+   Alphabet/Google has a huge array of products and features from Search, Gmail, Translate, Maps, Waymo, etc 
+   that may use AI models/ML algorithms.
+   
+   DeepMind's fraction of operational compute is the cloud-weighted blend of its
+two sub-shares; multiply by operational H100e to get DeepMind compute.
+   """)
 
-code("""dm_cloud_share = sq.to(0.25, 0.55)
+code("""dm_cloud_share = sq.to(0.2, 0.6)
 dm_noncloud_share = sq.to(0.33, 0.75)
 
 dm_cloud_share_samples = dm_cloud_share @ N_SAMPLES
@@ -144,12 +158,6 @@ dm_noncloud_share_samples = dm_noncloud_share @ N_SAMPLES
 
 summary("DM share of cloud half", dm_cloud_share_samples)
 summary("DM share of non-cloud half", dm_noncloud_share_samples);""")
-
-# ---------------------------------------------------------------------------
-md(r"""## Combine: DeepMind compute
-
-DeepMind's fraction of operational compute is the cloud-weighted blend of its
-two sub-shares; multiply by operational H100e to get DeepMind compute.""")
 
 code("""dm_fraction = (
     cloud_share_samples * dm_cloud_share_samples
@@ -325,6 +333,71 @@ for v in (wide[5], wide[95]):
 ax.set_xlabel("DeepMind H100e (millions)")
 ax.set_ylabel("Monte Carlo samples")
 ax.set_title("Sensitivity: doubling TPU uncertainty → DeepMind compute",
+             weight="bold")
+ax.legend()
+plt.show()""")
+
+# ---------------------------------------------------------------------------
+md(r"""## Sensitivity check: correlating the two DeepMind shares
+
+In the base case the cloud and non-cloud DeepMind shares are drawn
+**independently**. But the dominant uncertainty in both is really the same
+question — *what counts as DeepMind compute* (research org only? all first-party
+Gemini serving? Search-AI too?). A broad reading pushes **both** shares up
+together, which argues for a **positive correlation** between them.
+
+Sampling them independently lets a high cloud share offset a low non-cloud share
+(and vice versa), which artificially narrows the tails of the DeepMind total.
+Here we re-run the model across a range of correlations, reusing the *same*
+cloud-share and operational draws so the only thing that changes is the
+dependence between the two DeepMind shares. As correlation rises, the DeepMind
+90% CI should widen while the median stays put.
+
+A **modest positive correlation (~0.5)** is the most plausible case; the 0.9/0.99
+rows are upper bounds and the -0.9 row is a sanity check (anticorrelation should
+narrow the CI).""")
+
+code("""# sq.correlate requires |rho| < 1 strictly, so use 0.99 for the near-perfect case.
+# The -0.9 row is a sanity check: anticorrelation should narrow the CI vs. independent.
+# rho=0.5 is the plausible central assumption (a modest positive dependence).
+correlations = [-0.9, 0.0, 0.3, 0.5, 0.9, 0.99]
+rows = []
+for rho in correlations:
+    # Re-draw the two DM shares with the target correlation; marginals unchanged.
+    a, b = sq.correlate((sq.to(0.25, 0.55), sq.to(0.33, 0.75)), rho)
+    dmc, dmn = a @ N_SAMPLES, b @ N_SAMPLES
+    # Reuse baseline cloud-share and operational draws so only the dependence changes.
+    frac = cloud_share_samples * dmc + (1 - cloud_share_samples) * dmn
+    dm = operational * frac
+    pc = sq.get_percentiles(dm, percentiles=[5, 50, 95])
+    rows.append((rho, pc[5], pc[50], pc[95], pc[95] - pc[5]))
+
+print(f"{'corr':>5}  {'5th':>8}  {'median':>8}  {'95th':>8}  {'90% CI width':>13}")
+for rho, lo, med, hi, w in rows:
+    print(f"{rho:>5.2f}  {fmt(lo):>8}  {fmt(med):>8}  {fmt(hi):>8}  {fmt(w):>13}")
+base_w = next(w for rho, _, _, _, w in rows if rho == 0.0)  # the independent case
+print(f"\\n90% CI width at corr=0.99 is {rows[-1][4] / base_w - 1:+.0%} vs corr=0 "
+      f"(independent): {fmt(base_w)} → {fmt(rows[-1][4])}.")
+mid = next(r for r in rows if r[0] == 0.5)  # the plausible central assumption
+print(f"Plausible case: corr=0.5 gives median {fmt(mid[2])}, 90% CI {fmt(mid[1])}-{fmt(mid[3])} "
+      f"(width {fmt(mid[4])}, {mid[4] / base_w - 1:+.0%} vs independent).")
+neg = rows[0]  # the -0.9 sanity-check row
+print(f"Sanity check: corr={neg[0]:.1f} gives width {fmt(neg[4])} "
+      f"({neg[4] / base_w - 1:+.0%} vs independent) — anticorrelation narrows it.")
+
+rhos = [r[0] for r in rows]
+los = np.array([r[1] for r in rows]) / 1e6
+meds = np.array([r[2] for r in rows]) / 1e6
+his = np.array([r[3] for r in rows]) / 1e6
+
+fig, ax = plt.subplots(figsize=(9, 5))
+ax.fill_between(rhos, los, his, color="#7AC4C0", alpha=0.30, label="90% CI")
+ax.plot(rhos, his, "--", color="#2B5F5C", lw=1)
+ax.plot(rhos, los, "--", color="#2B5F5C", lw=1)
+ax.plot(rhos, meds, "o-", color="#1d4240", lw=2, label="median")
+ax.set_xlabel("correlation between DeepMind cloud & non-cloud shares")
+ax.set_ylabel("DeepMind H100e (millions)")
+ax.set_title("Sensitivity: DeepMind compute vs. correlation of the two shares",
              weight="bold")
 ax.legend()
 plt.show()""")
