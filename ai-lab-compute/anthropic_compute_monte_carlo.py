@@ -69,6 +69,22 @@ def percentiles(samples):
 
 
 # %% [markdown]
+# ## Canonical parameters
+#
+# The sampled priors are loaded from `lab_model_params.csv` — the single source
+# of truth shared with the other lab notebooks and `frontier_lab_compute_model.py`.
+# Edit the sheet (leaving a note in its description column) to change a prior.
+
+# %%
+import sys
+if not Path('lab_compute_utils.py').exists():
+    sys.path.append(str(Path('ai-lab-compute').resolve()))  # allow running from the repo root
+from lab_compute_utils import load_lab_params, lab_params_table
+
+PARAMS = load_lab_params()['anthropic']
+lab_params_table('anthropic')
+
+# %% [markdown]
 # ## 1. Borrow the Nvidia specs and the H100:GB200 ratio from the OpenAI model
 #
 # Two things come straight from `openai_compute_monte_carlo.py` so the two
@@ -260,7 +276,7 @@ print(f'Trainium2:                          {trainium2_per_mw:,.0f} H100e/MW')
 # %%
 # Upper bound 1.8 GW (OpenAI's 1.9 was believed to be ahead); left bound set so the
 # lognormal median lands on the memo's 1.4 GW (median = geometric mean of bounds).
-lab_power_gw = sq.to(1.4 ** 2 / 1.8, 1.8)  # 90% CI ≈ 1.09–1.8 GW, median 1.4
+lab_power_gw = PARAMS['lab_power_gw']  # 90% CI ≈ 1.09–1.8 GW, median 1.4
 power_samples_mw = (lab_power_gw @ N_SAMPLES) * 1000.0
 
 lo, mid, hi = percentiles(power_samples_mw)
@@ -300,7 +316,7 @@ def anthropic_h100e(total_power_mw, trainium_share):
 
 
 # Prior on the Trainium2 share of IT power (clipped to a sane band).
-trainium_share_prior = sq.norm(0.40, 0.80, lclip=0.1, rclip=0.9)
+trainium_share_prior = PARAMS['trainium_share']
 trainium_share = trainium_share_prior @ N_SAMPLES
 
 # Headline Monte Carlo: power and share vary together.

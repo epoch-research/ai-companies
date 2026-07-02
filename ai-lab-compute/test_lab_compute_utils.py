@@ -1,8 +1,10 @@
-"""Sanity-check script for lab_compute_utils.convert_it_power_to_chips."""
+"""Sanity-check script for lab_compute_utils."""
 
+import numpy as np
 import pandas as pd
+import squigglepy as sq
 
-from lab_compute_utils import convert_it_power_to_chips
+from lab_compute_utils import convert_it_power_to_chips, load_lab_params
 
 
 CHIP_SPECS = {
@@ -27,7 +29,40 @@ COMPOSITION = {
 }
 
 
+def check_lab_params_loader():
+    """Sanity checks for the canonical parameter sheet and its loader."""
+    params = load_lab_params()
+
+    expected_labs = {'deepmind', 'msl', 'openai', 'anthropic', 'alphabet_activities'}
+    assert expected_labs <= set(params), f"missing labs: {expected_labs - set(params)}"
+
+    sq.set_seed(1234)
+    msl_share = params['msl']['msl_share'] @ 2000
+    assert (msl_share >= 0.1).all() and (msl_share <= 0.9).all(), 'msl_share clips not applied'
+
+    new_chip = params['openai']['new_chip_share'] @ 2000
+    assert 0.15 < np.mean(new_chip) < 0.35, 'Beta(2, 6) mean should be ~0.25'
+
+    assert params['openai']['p_gross'] == 0.2, 'const rows should load as plain floats'
+
+    it_factor = params['openai']['if_it_power'] @ 2000
+    assert 0.9 < np.median(it_factor) < 1.1, 'if_it_power should straddle 1.0'
+
+    power = params['anthropic']['lab_power_gw'] @ 2000
+    assert 1.3 < np.median(power) < 1.5, 'anthropic power median should be ~1.4 GW'
+
+    share = params['alphabet_activities']['compute_share'] @ 5000
+    assert share.max() <= 1.0, 'compute_share rclip=1 not applied'
+
+    # Each call must build fresh objects so sensitivity cells get clean copies.
+    assert params['msl']['msl_share'] is not load_lab_params()['msl']['msl_share']
+
+    print('OK: lab_model_params.csv loads with expected labs, clips, and shapes.\n')
+
+
 def main():
+    check_lab_params_loader()
+
     df = convert_it_power_to_chips(
         power_added_mw_by_period=POWER_ADDED_MW,
         chip_specs=CHIP_SPECS,

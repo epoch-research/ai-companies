@@ -25,12 +25,15 @@
 #    the latest mix.
 # 2. **Deployment lag** — Nvidia books revenue when chips ship; they go live some
 #    quarters later. The lag controls which Microsoft snapshot each year reads.
-# 3. **Systematic power factor** — one shared multiplier on every disclosed
-#    megawatt figure, for the gap between disclosed and effective IT power.
+# 3. **Power definition factor** — is each disclosed figure IT power or gross
+#    (facility) power? One shared multiplier: 80% chance it's already IT (a small
+#    residual band around 1.0), 20% chance it's gross (divided by a 1.1–1.3
+#    datacenter PUE, a downward haircut). This is the gap between the disclosed
+#    number and effective IT power, and it can only pull the total down.
 # 4. **Rounding jitter** — each disclosure is reported to the nearest 0.1 GW, so
-#    the true value sits uniformly within ±50 MW. Same band for every year, so
-#    2025 (1.9 GW) is the most precise in relative terms and 2023 (0.2 GW) the
-#    least.
+#    the true value sits within ±50 MW. Modeled as a triangular peaked at 0, since
+#    the exact edges are less likely. Same band for every year, so 2025 (1.9 GW)
+#    is the most precise in relative terms and 2023 (0.2 GW) the least.
 #
 # Watts per GPU and H100e per GPU are held fixed for now (watts per GPU is the
 # sensible next thing to vary). With `new_chip_share = 0`, lag = 0, and nominal
@@ -65,6 +68,23 @@ def percentiles(samples):
 
 
 # %% [markdown]
+# ## Canonical parameters
+#
+# The sampled priors are loaded from `lab_model_params.csv` — the single source
+# of truth shared with the other lab notebooks and `frontier_lab_compute_model.py`.
+# Edit the sheet (leaving a note in its description column) to change a prior.
+# The sensitivity sweeps in sections 6–8 build local variants and don't touch it.
+
+# %%
+import sys
+if not Path('lab_compute_utils.py').exists():
+    sys.path.append(str(Path('ai-lab-compute').resolve()))  # allow running from the repo root
+from lab_compute_utils import load_lab_params, lab_params_table
+
+PARAMS = load_lab_params()['openai']
+lab_params_table('openai')
+
+# %% [markdown]
 # ## 1. Load the data and derive model inputs
 #
 # Three CSVs (the same ones the main model uses) give us: OpenAI's disclosed
@@ -76,7 +96,7 @@ data_dir = Path('ai-lab-compute') if Path('ai-lab-compute/IT power by chip.csv')
 owners_df = pd.read_csv(data_dir / 'nvidia_owners_cumulative_by_chip.csv')
 chip_power_df = pd.read_csv(data_dir / 'IT power by chip.csv')
 openai_df = pd.read_csv(data_dir / 'lab IT power.csv')
-openai_df['Date'] = pd.to_datetime(openai_df['Date'])
+openai_df['Date'] = pd.to_datetime(openai_df['Date'], format='%m/%d/%y')
 
 # IT power per GPU. The power CSV names Blackwell parts "GB200"/"GB300"; the
 # fleet data calls them "B200"/"B300", so we translate.
@@ -240,23 +260,35 @@ for lag in [0.0, 1.0, 2.0]:
 #   sits on longer contracts that don't refresh to the newest chips. Section 6
 #   sweeps alternatives.
 # - **Deployment lag** — lognormal, 90% range 0.5–2 quarters (median 1).
-# - **Systematic power factor** — lognormal, 90% range 0.85–1.15, shared across
-#   years.
-# - **Rounding jitter** — uniform ±50 MW per year (the 0.1 GW rounding step).
+# - **Power definition factor** — is each disclosed figure IT power or gross?
+#   80% IT (a small residual band around 1.0), 20% gross (divided by a 1.1–1.3
+#   PUE). One shared draw across years, since it reflects how OpenAI reports.
+# - **Rounding jitter** — triangular ±50 MW per year, peaked at 0 (the 0.1 GW
+#   rounding step; the exact edges are less likely than a flat band).
 
 # %%
-new_chip_share_prior = sq.beta(2, 6)
-lag_prior = sq.to(0.5, 2.0)
-systematic_power_prior = sq.to(0.85, 1.15)
-ROUNDING_MW = 50.0
+new_chip_share_prior = PARAMS['new_chip_share']
+lag_prior = PARAMS['lag_quarters']
+
+# Is each disclosed figure IT power, or gross (facility) power? P_GROSS is the
+# gross probability. This is the definitional uncertainty — separate from the
+# rounding jitter below, which is about precision.
+if_it_power = PARAMS['if_it_power']       # already IT: small residual definitional noise
+if_gross_power = 1 / PARAMS['gross_pue']  # gross: convert to IT by dividing by datacenter PUE
+P_GROSS = PARAMS['p_gross']
+power_definition_factor = sq.mixture([if_it_power, if_gross_power], [1 - P_GROSS, P_GROSS])
+
+ROUNDING_MW = 50.0  # disclosures are rounded to the nearest 0.1 GW
 
 
 def sample_total_power(n):
-    """Total power per year: one shared systematic factor times each disclosure
-    plus its own independent rounding jitter."""
-    systematic_factor = systematic_power_prior @ n
+    """Total power per year: one shared power-definition factor times each
+    disclosure, plus that disclosure's own rounding jitter. The definition factor
+    is drawn once per sample (it reflects how OpenAI reports, so it's the same
+    every year); the jitter is independent per year and peaks at zero."""
+    definition_factor = power_definition_factor @ n
     return {
-        date: (disclosed_power_mw[date] + (sq.uniform(-ROUNDING_MW, ROUNDING_MW) @ n)) * systematic_factor
+        date: (disclosed_power_mw[date] + (sq.triangular(-ROUNDING_MW, 0, ROUNDING_MW) @ n)) * definition_factor
         for date in OPENAI_DATES
     }
 
@@ -411,11 +443,58 @@ for name in priors:
     print(f'   {name:24s}: {fmt(lo)} / {fmt(mid)} / {fmt(hi)}')
 
 # %% [markdown]
+# ## 8. Sensitivity to the gross-vs-IT split
+#
+# The power definition factor assumes a 20% chance each disclosed figure is gross
+# (facility) power rather than IT. That split is a judgment call, so here we sweep
+# it: from 0% (always IT — the factor collapses to the tight residual band at 1.0)
+# up to 80% gross. More gross probability puts more weight on the 1/PUE haircut,
+# which pulls the total down and fattens its lower tail. `new_chip_share` and lag
+# keep varying (reusing the same samples); only the gross weight changes.
+
+# %%
+def total_power_with_gross_prob(n, p_gross):
+    """Re-sample total power with a given probability that each disclosure is gross
+    rather than IT. Same structure as sample_total_power, just a different weight."""
+    factor = sq.mixture([if_it_power, if_gross_power], [1 - p_gross, p_gross])
+    definition_factor = factor @ n
+    return {
+        date: (disclosed_power_mw[date] + (sq.triangular(-ROUNDING_MW, 0, ROUNDING_MW) @ n)) * definition_factor
+        for date in OPENAI_DATES
+    }
+
+
+gross_probs = [0.0, 0.2, 0.5, 0.8]
+gross_h100e = {
+    p: run_monte_carlo(new_chip_share, lag_quarters, total_power_with_gross_prob(N_SAMPLES, p))[last_date]['total_h100e']
+    for p in gross_probs
+}
+
+fig, ax = plt.subplots(figsize=(11, 5))
+ax.boxplot([gross_h100e[p] / 1e6 for p in gross_probs], showfliers=False, widths=0.55)
+ax.set_xticks(range(1, len(gross_probs) + 1))
+ax.set_xticklabels([f'{int(p * 100)}% gross' for p in gross_probs])
+ax.axhline(reference_h100e[last_date] / 1e6, color='#888780', ls='--', lw=1.4, label='main-model reference')
+ax.set_ylabel(f'{last_date.strftime("%Y")} total H100e (millions)')
+ax.set_title('Latest-year compute by P(disclosure is gross, not IT)', fontsize=12)
+ax.legend()
+ax.grid(True, alpha=0.3, axis='y')
+plt.tight_layout()
+plt.show()
+
+print('Latest-year total H100e by P(gross) (5th / median / 95th):')
+for p in gross_probs:
+    lo, mid, hi = percentiles(gross_h100e[p])
+    print(f'   {int(p * 100):>2d}% gross: {fmt(lo)} / {fmt(mid)} / {fmt(hi)}')
+
+# %% [markdown]
 # ### Takeaways
 #
-# - The biggest driver of total-compute uncertainty is the **systematic power
-#   factor** — it scales the whole fleet, so its ±15% flows almost directly into
-#   the H100e total.
+# - The biggest driver of total-compute uncertainty is the **power definition
+#   factor** — it scales the whole fleet, so its spread flows almost directly into
+#   the H100e total. Unlike the other knobs it is one-sided: the 20% chance a
+#   figure is gross rather than IT pulls a downward tail, so the interval is
+#   asymmetric (more room below the median than above).
 # - **`new_chip_share`** and the **deployment lag** move the total only modestly
 #   (the fleet is already mostly newest-vintage), but they are what reshape the
 #   **chip composition** — A100 vs. Blackwell share.

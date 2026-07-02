@@ -1,5 +1,7 @@
 """Helpers for modeling AI lab compute fleet buildout."""
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -111,3 +113,55 @@ def convert_it_power_to_chips(
             })
 
     return pd.DataFrame(rows)
+
+
+PARAMS_CSV = Path(__file__).with_name('lab_model_params.csv')
+
+
+def load_lab_params(csv_path=None):
+    """Load the canonical model priors from lab_model_params.csv.
+
+    The sheet is the single source of truth for the judgment priors shared by
+    the lab notebooks and frontier_lab_compute_model.py. Returns
+    {lab: {param: squigglepy distribution}}.
+
+    Column meanings: `dist` names the squigglepy constructor (to / norm /
+    beta / uniform); `low`/`high` are its two positional arguments — the 90%
+    credible interval for `to` and `norm`, the range for `uniform`, and the
+    alpha/beta shape parameters for `beta`. Optional `lclip`/`rclip` clip the
+    samples. `dist` = "const" returns `low` as a plain float (for scalar
+    judgment parameters like mixture weights).
+
+    Every call constructs fresh distribution objects, so a sensitivity cell
+    can call again for clean copies (useful before sq.correlate, which ties
+    together the objects it is given).
+    """
+    import squigglepy as sq
+
+    constructors = {'to': sq.to, 'norm': sq.norm, 'beta': sq.beta, 'uniform': sq.uniform}
+
+    params = {}
+    for _, row in pd.read_csv(csv_path or PARAMS_CSV).iterrows():
+        if row['dist'] == 'const':
+            value = float(row['low'])
+        elif row['dist'] in constructors:
+            kwargs = {}
+            for clip in ('lclip', 'rclip'):
+                if pd.notna(row[clip]):
+                    kwargs[clip] = float(row[clip])
+            value = constructors[row['dist']](float(row['low']), float(row['high']), **kwargs)
+        else:
+            raise ValueError(
+                f"{row['lab']}.{row['param']}: unknown dist {row['dist']!r} "
+                f"(expected const or one of {sorted(constructors)})"
+            )
+        params.setdefault(row['lab'], {})[row['param']] = value
+    return params
+
+
+def lab_params_table(lab, csv_path=None):
+    """One lab's rows of lab_model_params.csv, for display in a notebook."""
+    df = pd.read_csv(csv_path or PARAMS_CSV)
+    if lab not in set(df['lab']):
+        raise KeyError(f"no rows for lab {lab!r}; labs in sheet: {sorted(set(df['lab']))}")
+    return df[df['lab'] == lab].drop(columns=['lab']).reset_index(drop=True)

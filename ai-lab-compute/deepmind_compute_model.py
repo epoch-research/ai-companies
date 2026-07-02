@@ -76,6 +76,20 @@ def summary(name, samples):
 
 
 # %% [markdown]
+# ## Canonical parameters
+#
+# The headline priors are loaded from `lab_model_params.csv` — the single source
+# of truth shared with the other lab notebooks and `frontier_lab_compute_model.py`.
+# Edit the sheet (leaving a note in its description column) to change a prior.
+# Sensitivity cells further down build local variants and don't touch it.
+
+# %%
+from lab_compute_utils import load_lab_params, lab_params_table
+
+PARAMS = load_lab_params()["deepmind"]
+lab_params_table("deepmind")
+
+# %% [markdown]
 # ## 1. Total Google owned H100e
 #
 # Lognormal fits to the dashboard 90% CIs. The Nvidia and TPU fleets are drawn
@@ -88,8 +102,8 @@ def summary(name, samples):
 #    the CIs are too narrow.
 
 # %%
-nvidia_owned = sq.to(955 * K, 1.59 * M)   # median ~1.24M
-google_owned = sq.to(3.08 * M, 4.54 * M)  # median ~3.74M
+nvidia_owned = PARAMS["nvidia_owned"]   # median ~1.24M
+google_owned = PARAMS["google_owned"]   # median ~3.74M
 
 nvidia_samples = nvidia_owned @ N_SAMPLES
 google_samples = google_owned @ N_SAMPLES
@@ -109,7 +123,7 @@ summary("Total Google owned H100e", total_owned);
 # 1-quarter scenario (0.76) close to the median rather than out at the tail.
 
 # %%
-deployment_lag = sq.to(0.55, 0.87)
+deployment_lag = PARAMS["deployment_lag"]
 deployment_lag_samples = deployment_lag @ N_SAMPLES
 operational = total_owned * deployment_lag_samples
 
@@ -123,7 +137,7 @@ summary("Operational H100e", operational);
 # 0.45–0.55 band, median ~0.50.
 
 # %%
-cloud_share = sq.to(0.45, 0.55)
+cloud_share = PARAMS["cloud_share"]
 cloud_share_samples = cloud_share @ N_SAMPLES
 summary("Cloud share of Google ML compute", cloud_share_samples);
 
@@ -139,8 +153,8 @@ summary("Cloud share of Google ML compute", cloud_share_samples);
 #   Lognormal over 0.2–0.6, median ~0.35.
 # - **Non-cloud half:** splits between DeepMind-related work (consumer Gemini
 #   inference, DM R&D/training) and other internal workloads (recommenders ~1M,
-#   Waymo, etc.). Lognormal over 1/3 and 3/4, which leads to a median and mean
-#    of around 50%. __This is a pretty vibe-sy guess and should not be taken literally__. Why not lower? Qualitatively, DeepMind is likely a top priority for Google's AI compute, and DeepMind R&D is likely roughly as well-provisioned as other leading labs like OpenAI (~1.5 to 2M H100e ). Why not higher? Recommender systems are highly lucrative since they boost Google's 200B ads business, Alphabet/Google has a huge array of products and features from Search, Gmail, Translate, Maps, Waymo, etc that may use AI models/ML algorithms. 
+#   Waymo, etc.). Lognormal over 0.4 and 0.8, which gives a median
+#    of around 57%. __This is a pretty vibe-sy guess and should not be taken literally__. Why not lower? Qualitatively, DeepMind is likely a top priority for Google's AI compute, and DeepMind R&D is likely roughly as well-provisioned as other leading labs like OpenAI (~1.5 to 2M H100e ). Why not higher? Recommender systems are highly lucrative since they boost Google's 200B ads business, Alphabet/Google has a huge array of products and features from Search, Gmail, Translate, Maps, Waymo, etc that may use AI models/ML algorithms. 
 #    
 #    DeepMind's fraction of operational compute is the cloud-weighted blend of its
 # two sub-shares; multiply by operational H100e to get DeepMind compute.
@@ -149,8 +163,8 @@ summary("Cloud share of Google ML compute", cloud_share_samples);
 #    
 
 # %%
-dm_cloud_share = sq.to(0.2, 0.6)
-dm_noncloud_share = sq.to(0.33, 0.75)
+dm_cloud_share = PARAMS["dm_cloud_share"]
+dm_noncloud_share = PARAMS["dm_noncloud_share"]
 
 dm_cloud_share_samples = dm_cloud_share @ N_SAMPLES
 dm_noncloud_share_samples = dm_noncloud_share @ N_SAMPLES
@@ -432,7 +446,10 @@ correlations = [-0.9, 0.0, 0.3, 0.5, 0.9, 0.99]
 rows = []
 for rho in correlations:
     # Re-draw the two DM shares with the target correlation; marginals unchanged.
-    a, b = sq.correlate((sq.to(0.25, 0.55), sq.to(0.33, 0.75)), rho)
+    # Fresh copies of the canonical dists each time (sq.correlate ties the
+    # objects it is given, so we don't reuse the headline PARAMS objects).
+    fresh = load_lab_params()["deepmind"]
+    a, b = sq.correlate((fresh["dm_cloud_share"], fresh["dm_noncloud_share"]), rho)
     dmc, dmn = a @ N_SAMPLES, b @ N_SAMPLES
     # Reuse baseline cloud-share and operational draws so only the dependence changes.
     frac = cloud_share_samples * dmc + (1 - cloud_share_samples) * dmn

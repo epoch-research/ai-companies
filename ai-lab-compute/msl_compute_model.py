@@ -78,6 +78,20 @@ def summary(name, samples):
 
 
 # %% [markdown]
+# ## Canonical parameters
+#
+# The headline priors are loaded from `lab_model_params.csv` — the single source
+# of truth shared with the other lab notebooks and `frontier_lab_compute_model.py`.
+# Edit the sheet (leaving a note in its description column) to change a prior.
+# Sensitivity cells further down build local variants and don't touch it.
+
+# %%
+from lab_compute_utils import load_lab_params, lab_params_table
+
+PARAMS = load_lab_params()["msl"]
+lab_params_table("msl")
+
+# %% [markdown]
 # ## 1. Total Meta owned H100e
 #
 # Lognormal fits to the dashboard 90% CIs (AI Chip Owners, end-2025, sold
@@ -91,8 +105,8 @@ def summary(name, samples):
 # the dashboard CIs are arguably too narrow.
 
 # %%
-nvidia_owned = sq.to(1.43 * M, 2.38 * M)  # median ~1.84M
-amd_owned = sq.to(345 * K, 612 * K)       # median ~460k
+nvidia_owned = PARAMS["nvidia_owned"]  # median ~1.84M
+amd_owned = PARAMS["amd_owned"]        # median ~460k
 
 nvidia_samples = nvidia_owned @ N_SAMPLES
 amd_samples = amd_owned @ N_SAMPLES
@@ -116,7 +130,7 @@ summary("Total Meta owned H100e", total_owned);
 # tail.
 
 # %%
-deployment_lag = sq.to(0.62, 0.90)
+deployment_lag = PARAMS["deployment_lag"]
 deployment_lag_samples = deployment_lag @ N_SAMPLES
 operational = total_owned * deployment_lag_samples
 
@@ -138,15 +152,16 @@ summary("Operational H100e", operational);
 #   mid-2025 and the late-2025 frontier pivot likely tilted allocation further
 #   toward MSL by year-end.
 #
-# We center the split at ~50:50: lognormal over 0.4–0.6 (median ~0.49),
-# clipped to 0.1–0.9 — the true split is uncertain but very unlikely to be
-# more lopsided than 90:10 in either direction. __Like the DeepMind shares,
+# We center the split at ~50:50 with a deliberately wide band: lognormal
+# over 0.33–0.8 (median ~0.51), clipped to 0.1–0.9 — the true split is
+# uncertain but very unlikely to be more lopsided than 90:10 in either
+# direction. __Like the DeepMind shares,
 # this is a vibe-sy central estimate and should not be taken literally.__ It
 # is also sensitive to what counts as MSL (the research org only? all Meta AI
 # inference? GenAI features inside the ads stack?).
 
 # %%
-msl_share = sq.to(0.4, 0.6, lclip=0.1, rclip=0.9)
+msl_share = PARAMS["msl_share"]
 msl_share_samples = msl_share @ N_SAMPLES
 
 p = summary("MSL share of operational compute", msl_share_samples)
@@ -327,41 +342,40 @@ ax.set_title("MSL against the operational and owned fleets",
 plt.show()
 
 # %% [markdown]
-# ## Sensitivity check: widening the MSL-share uncertainty
+# ## Sensitivity check: narrowing and widening the MSL-share uncertainty
 #
-# The base 0.4–0.6 CI takes the mid-2025 analyst split roughly at face value.
-# But the 50:50 center is a point estimate, and there are reasons to want a
-# wider CI: how far the late-2025 pivot had actually shifted allocation by
-# December, and what counts as MSL at all. Here we re-run the model under
-# progressively wider share CIs — all the way out to the 0.1–0.9 hard bounds —
-# reusing the same owned-fleet and deployment-lag draws so the only thing that
+# The baseline 0.33–0.8 CI is deliberately wide. A tighter reading — taking
+# the mid-2025 analyst split roughly at face value — would be something like
+# 0.40–0.60; and there are also reasons to go wider still: how far the
+# late-2025 pivot had actually shifted allocation by December, and what
+# counts as MSL at all. Here we re-run the model across that ladder — from
+# the tight analyst-anchored band out to the 0.1–0.9 hard bounds — reusing
+# the same owned-fleet and deployment-lag draws so the only thing that
 # changes is the share spread:
 #
-# - **0.40–0.60** — baseline.
-# - **0.33–0.73** — 2× the baseline log-width, geometric median (~0.49) held
-#   fixed.
-# - **0.27–0.90** — 3× the log-width; the top of the CI touches the 0.9 hard
-#   bound.
+# - **0.40–0.60** — tight: the analyst split at face value.
+# - **0.33–0.80** — baseline (the canonical prior in the sheet).
+# - **0.27–0.90** — wider; the top of the CI touches the 0.9 hard bound.
 # - **0.10–0.90, uniform** — the limit case: any split between the 10:90 and
 #   90:10 hard bounds is equally likely. (A lognormal this wide centered near
 #   0.5 isn't possible — its geometric median would slide down to 0.3 — so the
 #   limit case switches to a uniform.)
 #
 # Each bar runs to the median of the resulting MSL distribution, with an
-# error bar spanning the 90% interval. Because the center is held at ~50:50,
-# the median barely moves — widening the share only stretches the tails.
+# error bar spanning the 90% interval. Because every row centers near ~50:50,
+# the median barely moves — the band width mainly stretches the tails.
 # Even the widest cases top out around 1.6M at the 95th percentile,
 # approaching but not reaching OpenAI's central ~1.7M.
 
 # %%
-# Progressively wider share CIs. The lognormal rows hold the geometric median
-# (~0.49) fixed; the uniform row is the maximal-uncertainty limit between the
-# hard bounds. Owned and lag draws are reused so only the share spread changes.
+# Share CIs from tight to maximal. The lognormal rows keep their geometric
+# median near ~0.5; the uniform row is the maximal-uncertainty limit between
+# the hard bounds. Owned and lag draws are reused so only the share changes.
 share_scenarios = [
-    ("0.40–0.60 (baseline)", msl_share_samples),
-    ("0.33–0.73 (2× log-width)",
-     sq.to(0.33, 0.73, lclip=0.1, rclip=0.9) @ N_SAMPLES),
-    ("0.27–0.90 (3× log-width)",
+    ("0.40–0.60 (tight)",
+     sq.to(0.4, 0.6, lclip=0.1, rclip=0.9) @ N_SAMPLES),
+    ("0.33–0.80 (baseline)", msl_share_samples),
+    ("0.27–0.90 (wider)",
      sq.to(0.27, 0.90, lclip=0.1, rclip=0.9) @ N_SAMPLES),
     ("0.10–0.90 (uniform)", sq.uniform(0.1, 0.9) @ N_SAMPLES),
 ]

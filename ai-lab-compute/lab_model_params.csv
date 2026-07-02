@@ -1,0 +1,23 @@
+lab,param,dist,low,high,lclip,rclip,units,description,last_updated
+deepmind,nvidia_owned,to,955000,1590000,,,H100e,"Google-owned Nvidia fleet, end-2025 sold basis (AI Chip Owners dashboard CI)",7/2/26
+deepmind,google_owned,to,3080000,4540000,,,H100e,"Google TPU fleet, end-2025 sold basis (dashboard CI; arguably too narrow - the notebook widens it 2x as a sensitivity check)",7/2/26
+deepmind,deployment_lag,to,0.55,0.87,,,ratio,Operational / owned; 90% CI spans a 0.5- to 2-quarter deployment lag,7/2/26
+deepmind,cloud_share,to,0.45,0.55,,,share,Cloud vs internal split of Google ML compute (CFO: 'around half' in 2025),7/2/26
+deepmind,dm_cloud_share,to,0.2,0.6,,,share,DeepMind's slice of the cloud half (enterprise Gemini inference vs external GPU/TPU rentals),7/2/26
+deepmind,dm_noncloud_share,to,0.4,0.8,,,share,"DeepMind's slice of the internal half (consumer Gemini + DM R&D vs recommenders etc); raised from (0.33, 0.75) on 2026-07-01",7/1/26
+msl,nvidia_owned,to,1430000,2380000,,,H100e,"Meta Nvidia fleet, end-2025 sold basis (AI Chip Owners dashboard CI)",7/2/26
+msl,amd_owned,to,345000,612000,,,H100e,"Meta AMD Instinct fleet, end-2025 (~20% of total; MTIA excluded)",7/2/26
+msl,deployment_lag,to,0.62,0.9,,,ratio,Operational / owned; 0.5- to 2-quarter lag on Meta's fast 2025 ramp,7/2/26
+msl,msl_share,to,0.33,0.8,0.1,0.9,share,"MSL (frontier) vs core-business recommender split; highly uncertain, clipped at 90:10 either way",7/2/26
+openai,new_chip_share,beta,2,6,,,share,Share of fleet refreshed to the newest chip mix. Beta distribution: the low/high columns hold the alpha/beta shape parameters (mean 0.25),7/2/26
+openai,lag_quarters,to,0.5,2,,,quarters,Deployment lag used to read Microsoft's chip mix (median 1 quarter),7/2/26
+openai,if_it_power,to,0.95,1.05,,,multiplier,Residual definitional noise if the disclosed figures are already IT power,7/2/26
+openai,gross_pue,to,1.1,1.3,,,ratio,Datacenter PUE divisor applied if the disclosed figures are gross (facility) power,7/2/26
+openai,p_gross,const,0.2,,,,probability,Probability the disclosures are gross rather than IT power; the notebook's section 8 sweeps this,7/2/26
+anthropic,lab_power_gw,to,1.088889,1.8,,,GW,End-2025 IT power. Upper bound 1.8 (just under OpenAI's 1.9); lower bound = 1.4^2/1.8 so the lognormal median lands on the memo's 1.4 GW,7/2/26
+anthropic,trainium_share,norm,0.4,0.8,0.1,0.9,share,Trainium2 share of IT power; anchored on Rainier ~700k chips and Amazon's 1.4M-chip ceiling,7/2/26
+alphabet_activities,compute_share,to,0.3,0.7,,1,share,"Share of the Alphabet-level activities expense that is compute (vs compensation, philanthropy, legal); clipped at 1",7/2/26
+alphabet_activities,nvidia_market_price,to,1.5,2,,,USD/H100e-hr,"Market price to rent one H100e (Hopper anchor, 3-year contract)",7/2/26
+alphabet_activities,cloud_margin,to,0.2,0.45,,,share,Cloud gross margin stripped from the market price to get Google's internal cost basis,7/2/26
+alphabet_activities,tpu_vs_nvidia_tco,to,0.5,0.78,,,ratio,"TPU vs Nvidia TCO per marketed 8-bit PFLOP (SemiAnalysis TPUv7 vs GB200/GB300, widened for fleet generalization)",7/2/26
+alphabet_activities,tpu_share,to,0.7,0.9,,1,share,TPU share of the DeepMind fleet cost blend; clipped at 1,7/2/26
