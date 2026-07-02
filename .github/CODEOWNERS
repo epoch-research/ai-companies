@@ -1,0 +1,2 @@
+# Require webdev-team review on CI/workflow changes (with branch protection requiring code-owner review).
+/.github/ @epoch-research/webdev-team
