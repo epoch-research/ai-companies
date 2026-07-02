@@ -1,0 +1,31 @@
+name: Upload to Airtable
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: airtable-upload-${{ github.event_name }}
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    # push→main uses `production` (prod base); manual dispatch uses `test`.
+    # The environment (production = main-only), not this line, is the security
+    # boundary — see the epochutils README / docs/airtable-upload-setup.md.
+    environment: ${{ github.event_name == 'push' && 'production' || 'test' }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      # epochutils is a public git dependency, so uv fetches it over HTTPS — no auth needed.
+      - name: Upload to Airtable
+        env:
+          MPLBACKEND: Agg   # headless matplotlib for the estimate notebooks
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          AIRTABLE_BASE_ID: ${{ vars.AIRTABLE_BASE_ID }}
+        run: uv run python upload_to_airtable.py

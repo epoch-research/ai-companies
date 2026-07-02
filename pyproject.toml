@@ -1,0 +1,26 @@
+[project]
+name = "ai-chip-counts"
+version = "0.1.0"
+description = "Estimates of AI chip quantities (chip sales), with an Airtable upload."
+requires-python = ">=3.11,<3.13"  # epochutils caps python <3.13
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "requests>=2.28",
+    "squigglepy",
+    "matplotlib>=3.7",
+    "python-dotenv>=1.0",
+    "papermill>=2.4",
+    "ipykernel>=6",
+    "epochutils",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+epochutils = { git = "https://github.com/epoch-research/epochutils.git", branch = "main" }
