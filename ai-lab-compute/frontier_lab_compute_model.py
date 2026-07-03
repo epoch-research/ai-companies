@@ -260,21 +260,31 @@ def model_openai():
 # ---------------------------------------------------------------------------
 # Anthropic H100e = total_power_mw x blended_H100e_per_mw, where the blend is set
 # by the Trainium2 share of power. At a fixed power budget the Nvidia mix and the
-# TPU mix buy about the same H100e per watt, while Trainium2 buys ~0.6x as much;
-# so the fleet collapses to two buckets and the Trainium2 power share is the lever.
+# TPU mix buy about the same H100e per watt, while Trainium2 buys ~0.75x as much
+# (per the New Carlisle equivalency in the sheet's chip_specs rows); so the fleet
+# collapses to two buckets and the Trainium2 power share is the lever.
 # Nvidia specs and the H100:Blackwell ratio are borrowed from the OpenAI model.
 
+# Shared hardware constants from the params sheet's chip_specs rows: TPU TDPs,
+# the IT-power overhead, and the supplied Trainium2 equivalency (a fleet worth a
+# known H100e draws a known IT power, which fixes the watts per chip).
+CHIP_SPECS = load_lab_params()["chip_specs"]
+
 TRAINIUM2_H100E = 1299 / 1979  # Trainium2 dense 8-bit throughput relative to an H100
-TRAINIUM2_REF_H100E = 300e3    # supplied equivalency: a 300k-H100e Trainium2 fleet...
-TRAINIUM2_REF_IT_MW = 478.0    # ...draws 478 MW of IT power, which fixes watts/chip
-TRAINIUM2_IT_WATTS = TRAINIUM2_H100E / (TRAINIUM2_REF_H100E / TRAINIUM2_REF_IT_MW) * 1e6
-IT_OVERHEAD = 1.742            # IT power per chip / TDP, for TPUs (no public server specs)
+TRAINIUM2_IT_WATTS = TRAINIUM2_H100E / (
+    CHIP_SPECS["trainium2_ref_h100e"] / CHIP_SPECS["trainium2_ref_it_mw"]) * 1e6
+IT_OVERHEAD = CHIP_SPECS["tpu_it_overhead"]  # IT power per chip / TDP, for TPUs (no public server specs)
 
 
 def _tpu_mix_per_mw():
     """Google's real v5+ TPU fleet efficiency (H100e per MW), scored on native
     8-bit peak, weighted by chip count x IT power -- the OpenAI methodology."""
-    tpu_tdp_w = {"TPU v5e": 225, "TPU v5p": 540, "TPU v6e": 380, "TPU v7": 960}
+    tpu_tdp_w = {
+        "TPU v5e": CHIP_SPECS["tpu_v5e_tdp"],
+        "TPU v5p": CHIP_SPECS["tpu_v5p_tdp"],
+        "TPU v6e": CHIP_SPECS["tpu_v6e_tdp"],
+        "TPU v7": CHIP_SPECS["tpu_v7_tdp"],
+    }
     tpu_8bit = {"TPU v5e": 3.93e14, "TPU v5p": 9.18e14, "TPU v6e": 1.836e15, "TPU v7": 4.614e15}
     it_watts = {c: tpu_tdp_w[c] * IT_OVERHEAD for c in tpu_tdp_w}
     h100e_per_chip = {c: tpu_8bit[c] / H100_FLOPS for c in tpu_tdp_w}
@@ -321,8 +331,9 @@ def model_anthropic(openai_result):
     P = load_lab_params()["anthropic"]
     power_mw = (P["lab_power_gw"] @ N_SAMPLES) * 1000.0
 
-    # Trainium2 share of IT power: ~normal, median ~0.6, anchored on Rainier's
-    # ~700k chips and Amazon's 1.4M-chip ceiling. Sampled independently of power.
+    # Trainium2 share of IT power: ~normal, median ~0.52, anchored on New Carlisle
+    # + Madison site power (Epoch's data-center directory) and ceiling-checked
+    # against Amazon's ~1.4M deployed chips. Sampled independently of power.
     trainium_share = P["trainium_share"] @ N_SAMPLES
 
     blended_per_mw = trainium_share * trainium2_per_mw + (1 - trainium_share) * nontrainium_per_mw

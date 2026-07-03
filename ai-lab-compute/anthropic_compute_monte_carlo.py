@@ -74,6 +74,8 @@ def percentiles(samples):
 # The sampled priors are loaded from `lab_model_params.csv` — the single source
 # of truth shared with the other lab notebooks and `frontier_lab_compute_model.py`.
 # Edit the sheet (leaving a note in its description column) to change a prior.
+# The sheet's `chip_specs` rows supply the shared hardware constants used below:
+# TPU TDPs, the IT-power overhead, and the Trainium2 power equivalency.
 
 # %%
 import sys
@@ -81,7 +83,9 @@ if not Path('lab_compute_utils.py').exists():
     sys.path.append(str(Path('ai-lab-compute').resolve()))  # allow running from the repo root
 from lab_compute_utils import load_lab_params, lab_params_table
 
-PARAMS = load_lab_params()['anthropic']
+LAB_PARAMS = load_lab_params()
+PARAMS = LAB_PARAMS['anthropic']
+CHIP_SPECS = LAB_PARAMS['chip_specs']
 lab_params_table('anthropic')
 
 # %% [markdown]
@@ -146,22 +150,25 @@ print(f'   Hopper : Blackwell count ratio = {hopper_units / blackwell_units:.2f}
 # - **H100e per chip.** Trainium2's dense 8-bit throughput is 1299 TFLOP/s; an
 #   H100's is 1979, so one Trainium2 is about two-thirds of an H100e — the same
 #   ratio Epoch's chip database reports.
-# - **IT power per chip.** We pin this to a supplied equivalency: a Trainium2
-#   fleet worth **300k H100e draws 478 MW of IT power**. Dividing through by the
-#   per-chip H100e gives the server-level watts per chip — about **1050 W**, which
-#   makes Trainium2 slightly *less* power-efficient than an H100 (a watt of
-#   Trainium2 buys ~630 H100e, against an H100's ~720). That sits well with the
-#   summary's note that Anthropic's fleet is less power-efficient per gigawatt
-#   than OpenAI's.
+# - **IT power per chip.** We pin this to a mid-2025 snapshot of Project Rainier in
+#   [Epoch's AI data-center directory](https://epoch.ai/data/ai-data-centers/directory/anthropic-amazon-new-carlisle)
+#   (Anthropic–Amazon New Carlisle): a Trainium2 fleet worth **300k H100-eq draws
+#   398 MW of IT power**, stored as two `chip_specs` rows in the params sheet.
+#   Dividing through by the per-chip H100e gives the server-level watts per chip —
+#   about **871 W**. A watt of Trainium2 then buys marginally *more* H100e than a
+#   watt of H100 (~754 per MW against ~720) but well under the Blackwell-heavy
+#   Nvidia and TPU mixes (§3), so Anthropic's fleet still comes out less
+#   power-efficient per gigawatt than OpenAI's.
 
 # %%
 TRAINIUM2_H100E = 1299 / 1979      # dense 8-bit throughput relative to an H100
 
-# IT power per chip is pinned to a supplied equivalency: a 300k-H100e Trainium2
-# fleet draws 478 MW of IT power. With the per-chip H100e above, that fixes both
-# the watts per chip and the H100e bought per megawatt of Trainium power.
-TRAINIUM2_REF_H100E = 300e3
-TRAINIUM2_REF_IT_MW = 478.0
+# IT power per chip is pinned to the supplied fleet-level equivalency from the
+# params sheet (a Trainium2 fleet worth a known H100e draws a known IT power).
+# With the per-chip H100e above, that fixes both the watts per chip and the
+# H100e bought per megawatt of Trainium power.
+TRAINIUM2_REF_H100E = CHIP_SPECS['trainium2_ref_h100e']
+TRAINIUM2_REF_IT_MW = CHIP_SPECS['trainium2_ref_it_mw']
 TRAINIUM2_IT_WATTS = TRAINIUM2_H100E / (TRAINIUM2_REF_H100E / TRAINIUM2_REF_IT_MW) * 1e6
 
 WATTS = {
@@ -176,7 +183,9 @@ H100E_PER_CHIP = {
 }
 
 print(f'Trainium2: {TRAINIUM2_H100E:.3f} H100e/chip; IT power per chip implied by the '
-      f'300k-H100e = 478-MW equivalency = {TRAINIUM2_IT_WATTS:,.0f} W')
+      f'{TRAINIUM2_REF_H100E / 1e3:.0f}k-H100e = {TRAINIUM2_REF_IT_MW:.0f}-MW equivalency '
+      f'= {TRAINIUM2_IT_WATTS:,.0f} W')
+lab_params_table('chip_specs')
 
 # %% [markdown]
 # ## 3. Chip efficiency: Nvidia ≈ TPU, Trainium2 lower
@@ -190,14 +199,15 @@ print(f'Trainium2: {TRAINIUM2_H100E:.3f} H100e/chip; IT power per chip implied b
 #   power (the OpenAI methodology). TPUs are scored on **native 8-bit peak**,
 #   consistent with the rest of our work — this flatters the pre-v7 parts that lack
 #   native FP8, but keeps H100e defined the same way as for the Nvidia chips. TPU
-#   IT power is TDP × 1.742 (the overhead implied by Nvidia's GB200 NVL72).
-# - **Trainium2** — pinned to the 300k-H100e = 478-MW equivalency.
+#   IT power is TDP × an overhead factor implied by Nvidia's GB200 NVL72 (TDPs
+#   and the overhead are `chip_specs` rows in the params sheet).
+# - **Trainium2** — pinned to the 300k-H100e = 398-MW New Carlisle equivalency.
 #
 # The Nvidia and TPU mixes come out within a few percent of each other; Trainium2
-# is about 0.6× both.
+# is about 0.75× both.
 
 # %%
-IT_OVERHEAD = 1.742    # IT power per chip / TDP, for TPUs (no public server specs)
+IT_OVERHEAD = CHIP_SPECS['tpu_it_overhead']  # IT power per chip / TDP, for TPUs (no public server specs)
 H100_FLOPS = 1.979e15  # H100 dense 8-bit FLOP/s, the H100e denominator
 
 # Per-chip H100e per MW for the three modelled chips (from the section-2 specs).
@@ -210,8 +220,14 @@ h100_power_share = (h100_units_per_gb200 * WATTS['H100']) / (
     h100_units_per_gb200 * WATTS['H100'] + WATTS['GB200'])
 nvidia_mix_per_mw = h100_power_share * h100e_per_mw['H100'] + (1 - h100_power_share) * h100e_per_mw['GB200']
 
-# TPU mix: Google's real v5+ fleet, scored on native 8-bit peak.
-tpu_tdp_w = {'TPU v5e': 225, 'TPU v5p': 540, 'TPU v6e': 380, 'TPU v7': 960}
+# TPU mix: Google's real v5+ fleet, scored on native 8-bit peak. TDPs come from
+# the params sheet.
+tpu_tdp_w = {
+    'TPU v5e': CHIP_SPECS['tpu_v5e_tdp'],
+    'TPU v5p': CHIP_SPECS['tpu_v5p_tdp'],
+    'TPU v6e': CHIP_SPECS['tpu_v6e_tdp'],
+    'TPU v7': CHIP_SPECS['tpu_v7_tdp'],
+}
 tpu_native_8bit_flops = {'TPU v5e': 3.93e14, 'TPU v5p': 9.18e14, 'TPU v6e': 1.836e15, 'TPU v7': 4.614e15}
 tpu_it_watts = {chip: tpu_tdp_w[chip] * IT_OVERHEAD for chip in tpu_tdp_w}
 tpu_h100e_per_chip = {chip: tpu_native_8bit_flops[chip] / H100_FLOPS for chip in tpu_tdp_w}
@@ -250,7 +266,7 @@ plt.show()
 # %% [markdown]
 # Because the Nvidia and TPU mixes are so close, we treat all non-Trainium compute
 # as one high-efficiency bucket (their midpoint — the exact Nvidia:TPU split barely
-# matters) and let Trainium2 keep its 300k = 478 MW value.
+# matters) and let Trainium2 keep its 300k = 398 MW value.
 
 # %%
 nontrainium_per_mw = (nvidia_mix_per_mw + tpu_mix_per_mw) / 2
@@ -283,29 +299,30 @@ lo, mid, hi = percentiles(power_samples_mw)
 print(f'Anthropic end-2025 IT power (GW): {lo / 1000:.2f} / {mid / 1000:.2f} / {hi / 1000:.2f}  (5th / median / 95th)')
 
 # %% [markdown]
-# ## 5. The Trainium2 share, anchored on the deployment evidence
+# ## 5. The Trainium2 share, anchored on the site power evidence
 #
-# Instead of sweeping the Trainium2 share, we put a prior on it, anchored on what is
-# actually known about Anthropic's Trainium2 fleet:
+# Instead of sweeping the Trainium2 share, we put a prior on it, anchored on the
+# Trainium2 campuses tracked in
+# [Epoch's AI data-center directory](https://epoch.ai/data/ai-data-centers/directory/anthropic-amazon-new-carlisle):
 #
-# - **Project Rainier (Anthropic's flagship Trainium site) held ~700k Trainium2 at
-#   end-2025**, against a ~1M target it missed by months. At the central 1.4 GW,
-#   700k chips × ~1046 W ≈ 730 MW ≈ a **~52% power share**.
-# - **The Amazon Mississippi campus** may add a few hundred thousand more (less
-#   certain), pushing Anthropic toward **~1.0M chips ≈ 75% of power**.
-# - **Amazon had ~1.4M Trainium2 deployed in total at end-2025** ("fully
-#   subscribed"). That is a hard ceiling: Anthropic is the dominant Trainium2
-#   customer but not the only one (AWS internal use and other customers take some),
-#   so Anthropic's slice of that 1.4M is large but well short of all of it.
+# - **New Carlisle (Project Rainier)** stepped up to **~626 MW of IT power in late
+#   December 2025** on Epoch's dating. The year-end figure is probably ~600 MW, but
+#   could still have been ~400 MW if that last step in fact landed after year-end.
+# - **The Amazon Madison campus (Mississippi)** held **~284 MW** from mid-2025
+#   (Trainium2, by its compute-to-power ratio) — though it is not clear all of it
+#   served Anthropic.
+# - Together that is **up to ~900 MW**, and residual Trainium2 beyond the two
+#   sites plausibly brings the high case to **~1.0 GW ≈ 70%** of the central
+#   1.4 GW. A share much above that is also hard to square with priors, since
+#   Anthropic demonstrably runs meaningful Nvidia and TPU fleets too.
+# - The low case — New Carlisle still at ~400 MW and Madison only partly
+#   Anthropic's — lands near **~500 MW ≈ 35%**.
 #
-# Putting these together, Anthropic's Trainium2 is **~800k chips central**, which at
-# 1.4 GW is a **~60% power share**. We model the share as roughly **normal with a
-# 90% CI of 0.40–0.80** (median ~0.60). The low end is deliberately loose — it
-# covers "Rainier only," and the chance that some of Rainier wasn't online or wasn't
-# Anthropic's at year-end, on the high-power scenario — while the high end is
-# "Rainier + Mississippi and then some." Share and power are sampled independently
-# (scale and mix are largely separate questions), and §6 checks that the implied
-# chip counts stay sane.
+# So we model the share as roughly **normal with a 90% CI of 0.35–0.70** (median
+# ~0.52), clipped to a sane band. Amazon's **~1.4M deployed Trainium2** ("fully
+# subscribed") remains a hard ceiling on the implied chip count — Anthropic is the
+# dominant but not sole customer — and §6 checks the prior against it. Share and
+# power are sampled independently (scale and mix are largely separate questions).
 
 # %%
 def anthropic_h100e(total_power_mw, trainium_share):
@@ -364,8 +381,9 @@ plt.show()
 # ## 6. Cross-check: implied Trainium2 chip count
 #
 # The share prior implies a Trainium2 chip count (Trainium2 power ÷ its IT watts).
-# It should land on the deployment evidence: ~700k at Rainier, plausibly ~1.0M with
-# Mississippi, and below Amazon's ~1.4M total as a hard ceiling.
+# It should land on the site evidence: ~720k chips at New Carlisle (626 MW at
+# ~871 W), ~1.05M adding Madison (~910 MW combined), and below Amazon's ~1.4M
+# total as a hard ceiling.
 
 # %%
 implied_trainium_chips = trainium_share * power_samples_mw * 1e6 / TRAINIUM2_IT_WATTS
@@ -374,11 +392,11 @@ print(f'Implied Anthropic Trainium2 chips (5th / median / 95th): '
       f'{fmt(c_lo)} / {fmt(c_mid)} / {fmt(c_hi)}')
 print(f'   median is {c_mid / 1.4e6:.0%} of Amazon\'s 1.4M total; '
       f'{np.mean(implied_trainium_chips > 1.4e6):.1%} of samples exceed the 1.4M ceiling')
-print(f'   Rainier anchor ~700k; Rainier + Mississippi ~1.0M')
+print(f'   New Carlisle anchor ~720k; + Madison ~1.05M')
 
 fig, ax = plt.subplots(figsize=(9, 4.5))
 ax.hist(implied_trainium_chips / 1e3, bins=60, color='#e8710a', alpha=0.85, edgecolor='white')
-for value, label, style in [(700, 'Rainier ~700k', '-'), (1000, '+Mississippi ~1.0M', '--'),
+for value, label, style in [(720, 'New Carlisle ~720k', '-'), (1045, '+Madison ~1.05M', '--'),
                             (1400, 'Amazon total 1.4M', ':')]:
     ax.axvline(value, color='#444441', ls=style, lw=1.4)
     ax.text(value, ax.get_ylim()[1] * 0.92, f' {label}', rotation=90, va='top', fontsize=8, color='#444441')
@@ -429,15 +447,19 @@ for name, samples in decomposition.items():
 # %% [markdown]
 # ## 8. Takeaways
 #
-# - **Headline: Anthropic had roughly 1.1M H100e online at end-2025**, with a 90%
-#   interval of about **0.8M–1.4M** — squarely inside the research summary's "≥1M,
-#   likely <1.5M" range, and ~60% of OpenAI's ~1.7M.
+# - **Headline: Anthropic had roughly 1.2M H100e online at end-2025**, with a 90%
+#   interval of about **0.95M–1.55M** — centered in the research summary's "≥1M,
+#   likely <1.5M" range, though the upper tail now pokes just past 1.5M; ~70% of
+#   OpenAI's ~1.8M.
 # - **The estimate rests on two inputs: total power and the Trainium2 share.** The
-#   share prior (median ~60%, 90% CI 40–80%) is anchored on Rainier's ~700k chips
-#   and Amazon's 1.4M-chip ceiling, with a deliberately loose low end; it implies
-#   ~800k Anthropic Trainium2 chips at the median, between the two anchors.
+#   share prior (median ~52%, 90% CI 35–70%) is anchored on the site power in
+#   Epoch's data-center directory — New Carlisle ~626 MW at end-2025 plus Madison
+#   ~284 MW, with allowances for timing and non-Anthropic use (§5). It implies
+#   ~845k Anthropic Trainium2 chips at the median, between the New Carlisle-only
+#   (~720k) and +Madison (~1.05M) anchors, with ~1% of draws breaching Amazon's
+#   1.4M-chip ceiling.
 # - **Power is the larger source of spread** — its ~1.09–1.8 GW band moves H100e
-#   about three times as much as the share prior does. Tightening the power figure
+#   about five times as much as the share prior does. Tightening the power figure
 #   is the highest-leverage way to narrow the estimate.
 # - **Nvidia and TPU are interchangeable here** — within a few percent on H100e per
 #   watt (native-peak basis), so the non-Trainium split does not affect the total.

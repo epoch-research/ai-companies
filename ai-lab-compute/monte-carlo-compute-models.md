@@ -21,7 +21,7 @@ The four models fall into two families. DeepMind and MSL are **top-down allocati
 | Google DeepMind | 1.07M | 1.60M | 2.45M |
 | Meta SL | 531k | 892k | 1.52M |
 | OpenAI | 1.44M | 1.77M | 1.94M |
-| Anthropic | 826k | 1.09M | 1.43M |
+| Anthropic | 941k | 1.22M | 1.58M |
 
 ---
 
@@ -88,18 +88,18 @@ Two fleet constructions are built from the mix and blended: **default** (vintage
 
 ## 4. Anthropic (power-based)
 
-**Structure:** `Anthropic H100e = total IT power × blended H100e-per-MW`, where the blend is set by one lever — the **Trainium2 share of power**. Justification for the two-bucket collapse: at fixed power, the Nvidia mix (991 H100e/MW) and Google's real v5+ TPU fleet mix (1,018 H100e/MW, native 8-bit scoring, IT overhead 1.742× TDP) buy nearly the same compute per watt (within ~3%), while Trainium2 buys 628 H100e/MW (~0.63×). So non-Trainium compute is treated as one bucket at the midpoint (~1,005 H100e/MW), and the Nvidia:TPU split becomes irrelevant to the total. No deployment-lag machinery: the anchor power figure is described as already online.
+**Structure:** `Anthropic H100e = total IT power × blended H100e-per-MW`, where the blend is set by one lever — the **Trainium2 share of power**. Justification for the two-bucket collapse: at fixed power, the Nvidia mix (991 H100e/MW) and Google's real v5+ TPU fleet mix (1,018 H100e/MW, native 8-bit scoring, IT overhead 1.742× TDP) buy nearly the same compute per watt (within ~3%), while Trainium2 buys 754 H100e/MW (~0.76×). So non-Trainium compute is treated as one bucket at the midpoint (~1,005 H100e/MW), and the Nvidia:TPU split becomes irrelevant to the total. No deployment-lag machinery: the anchor power figure is described as already online.
 
-Chip constants are **borrowed from the OpenAI model** for consistency: H100/GB200 watts and H100e ratios, plus OpenAI's end-2025 Hopper:Blackwell count ratio (~1.24:1, A100 dropped, GB300 folded into Blackwell) to weight the Nvidia mix. Trainium2: 0.656 H100e/chip (1,299 vs 1,979 TFLOP/s dense 8-bit); watts/chip ≈ 1,046, pinned by the supplied equivalency that a 300k-H100e Trainium2 fleet draws 478 MW of IT power — making Trainium2 slightly less power-efficient than an H100.
+Chip constants are **borrowed from the OpenAI model** for consistency: H100/GB200 watts and H100e ratios, plus OpenAI's end-2025 Hopper:Blackwell count ratio (~1.24:1, A100 dropped, GB300 folded into Blackwell) to weight the Nvidia mix. Trainium2: 0.656 H100e/chip (1,299 vs 1,979 TFLOP/s dense 8-bit); watts/chip ≈ 871, pinned by a mid-2025 Project Rainier (New Carlisle) snapshot — a 300k-H100-eq Trainium2 fleet draws 398 MW of IT power ([Epoch AI data-center directory, Anthropic–Amazon New Carlisle](https://epoch.ai/data/ai-data-centers/directory/anthropic-amazon-new-carlisle)) — making a Trainium2 watt marginally better than an H100's, though still ~0.75× the Blackwell-heavy Nvidia/TPU mixes.
 
 | Parameter | Distribution (90% CI) | Reasoning |
 |---|---|---|
 | Total IT power | lognormal 1.4²/1.8 ≈ 1.09 – 1.8 GW (median 1.4 GW) | Leaked OpenAI internal memo put Anthropic at ~1.4 GW online end-2025. Upper bound ~1.8 GW sits just under OpenAI's own 1.9 GW, since the memo was confident OpenAI was ahead; the lower bound then follows mechanically from the lognormal median = geometric mean of bounds. Residual risk: if 1.4 GW were facility power, true IT power (~1.0 GW) would fall below this floor. |
-| Trainium2 share of IT power | ~normal 0.40 – 0.80 (median ~0.60), clipped to [0.1, 0.9] | Anchored on deployment evidence: Project Rainier held ~700k Trainium2 at end-2025 (missed its ~1M target), ≈ 730 MW ≈ 52% of power at 1.4 GW; the Amazon Mississippi campus may add a few hundred thousand more (~1.0M chips ≈ 75%); Amazon's total ~1.4M deployed Trainium2 ("fully subscribed") is a hard ceiling Anthropic can't take all of. Central ~800k chips ⇒ ~60% share. Low end deliberately loose ("Rainier only," partly offline, high-power scenario). Sampled independently of power (scale and mix are largely separate questions). |
+| Trainium2 share of IT power | ~normal 0.35 – 0.70 (median ~0.52), clipped to [0.1, 0.9] | Anchored on site power in Epoch's data-center directory: New Carlisle (Project Rainier) stepped to ~626 MW of IT power in late December 2025 (possibly still ~400 MW at year-end if that step slipped), and the Amazon Madison campus (MS) held ~284 MW from mid-2025 — Trainium2 by its compute-to-power ratio, though perhaps not all Anthropic's. Together up to ~900 MW; residual Trainium2 beyond the two sites brings the high case to ~1.0 GW ≈ 70% of the central 1.4 GW (also near a prior ceiling, given Anthropic's known Nvidia and TPU fleets). Low case (~400 MW New Carlisle + partial Madison) ≈ 500 MW ≈ 35%. Amazon's total ~1.4M deployed Trainium2 ("fully subscribed") remains a hard chip ceiling. Sampled independently of power (scale and mix are largely separate questions). |
 
-**Cross-check (notebook):** implied Trainium2 chips 498k / 804k / 1.17M; median = 57% of Amazon's 1.4M; only 0.7% of samples breach the ceiling — consistent with the anchors.
+**Cross-check (notebook):** implied Trainium2 chips 532k / 844k / 1.24M; median = 60% of Amazon's 1.4M and sits between the New Carlisle-only (~720k) and +Madison (~1.05M) anchors; 1.3% of samples breach the ceiling.
 
-**Result:** 826k / 1.09M / 1.43M H100e — ~60% of OpenAI's median, inside the research summary's "≥1M, likely <1.5M." Power contributes roughly 3× the spread of the share prior, so tightening the power figure is the highest-leverage refinement.
+**Result:** 946k / 1.22M / 1.57M H100e — ~70% of OpenAI's median, centered in the research summary's "≥1M, likely <1.5M" (the upper tail pokes just past 1.5M). Power contributes roughly 5× the spread of the share prior, so tightening the power figure is the highest-leverage refinement.
 
 ---
 

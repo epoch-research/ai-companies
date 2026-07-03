@@ -54,6 +54,14 @@ def check_lab_params_loader():
     share = params['alphabet_activities']['compute_share'] @ 5000
     assert share.max() <= 1.0, 'compute_share rclip=1 not applied'
 
+    # Shared hardware constants load as plain floats from the chip_specs rows.
+    chip_specs = params['chip_specs']
+    expected_specs = {'tpu_v5e_tdp', 'tpu_v5p_tdp', 'tpu_v6e_tdp', 'tpu_v7_tdp',
+                      'tpu_it_overhead', 'trainium2_ref_h100e', 'trainium2_ref_it_mw'}
+    assert expected_specs <= set(chip_specs), f"missing chip specs: {expected_specs - set(chip_specs)}"
+    assert all(isinstance(value, float) for value in chip_specs.values()), \
+        'chip_specs rows should all be const (plain floats)'
+
     # Each call must build fresh objects so sensitivity cells get clean copies.
     assert params['msl']['msl_share'] is not load_lab_params()['msl']['msl_share']
 

@@ -132,6 +132,11 @@ def load_lab_params(csv_path=None):
     samples. `dist` = "const" returns `low` as a plain float (for scalar
     judgment parameters like mixture weights).
 
+    Besides the per-lab judgment priors, the sheet carries a `chip_specs`
+    group of const rows: shared hardware constants (TPU TDPs, the TPU
+    IT-power overhead, and the Trainium2 power equivalency) used by the
+    Anthropic notebook and the frontier script.
+
     Every call constructs fresh distribution objects, so a sensitivity cell
     can call again for clean copies (useful before sq.correlate, which ties
     together the objects it is given).
