@@ -16,8 +16,8 @@
 # %% [markdown]
 # # OpenAI compute Monte Carlo
 #
-# Turns the single medians of `openai_power_model.ipynb` into full distributions
-# by sampling the four main sources of uncertainty together:
+# Turns the single medians of `archive/openai_power_model.ipynb` into full distributions
+# by sampling the six main sources of uncertainty together:
 #
 # 1. **`new_chip_share`** — the chip-mix knob. The share of OpenAI's power placed
 #    on the *newest* year's deployment mix; the rest follows the *default*
@@ -27,17 +27,26 @@
 #    quarters later. The lag controls which Microsoft snapshot each year reads.
 # 3. **Power definition factor** — is each disclosed figure IT power or gross
 #    (facility) power? One shared multiplier: 80% chance it's already IT (a small
-#    residual band around 1.0), 20% chance it's gross (divided by a 1.1–1.3
+#    residual band around 1.0), 20% chance it's gross (divided by a 1.1–1.7
 #    datacenter PUE, a downward haircut). This is the gap between the disclosed
 #    number and effective IT power, and it can only pull the total down.
 # 4. **Rounding jitter** — each disclosure is reported to the nearest 0.1 GW, so
 #    the true value sits within ±50 MW. Modeled as a triangular peaked at 0, since
 #    the exact edges are less likely. Same band for every year, so 2025 (1.9 GW)
 #    is the most precise in relative terms and 2023 (0.2 GW) the least.
+# 5. **IT overhead factor** — watts per GPU is server power times an IT overhead
+#    (networking, storage, management). We vary that overhead: median 1.14, 5th–95th
+#    ~1.0–1.35, floored at 1.0 (from the Colossus data-center calculations). Higher
+#    overhead means fewer chips per disclosed MW, so it moves the total both ways —
+#    a low overhead is the model's main upside lever.
+# 6. **Figure accuracy** — is OpenAI's internal total-power number itself right,
+#    setting aside rounding and the IT-vs-gross question? Undercounted providers
+#    or newly-online capacity push the true figure up; overstatement pushes it
+#    down. One shared draw, 90% range 0.9–1.2 (median ~1.04, a mild upward lean).
 #
-# Watts per GPU and H100e per GPU are held fixed for now (watts per GPU is the
-# sensible next thing to vary). With `new_chip_share = 0`, lag = 0, and nominal
-# power, the model reproduces `openai_power_model.ipynb` exactly.
+# H100e per GPU is still held fixed. With `new_chip_share = 0`, lag = 0, nominal
+# power, and the median IT overhead, the model reproduces the deterministic
+# `archive/openai_power_model.ipynb` reference.
 
 # %%
 from pathlib import Path
@@ -81,7 +90,9 @@ if not Path('lab_compute_utils.py').exists():
     sys.path.append(str(Path('ai-lab-compute').resolve()))  # allow running from the repo root
 from lab_compute_utils import load_lab_params, lab_params_table
 
-PARAMS = load_lab_params()['openai']
+_ALL_PARAMS = load_lab_params()
+PARAMS = _ALL_PARAMS['openai']
+IT_OVERHEAD = _ALL_PARAMS['chip_specs']['nvidia_it_overhead']  # server power -> IT power per GPU
 lab_params_table('openai')
 
 # %% [markdown]
@@ -91,21 +102,27 @@ lab_params_table('openai')
 # power per year, Microsoft's fleet over time, and IT power per chip.
 
 # %%
-data_dir = Path('ai-lab-compute') if Path('ai-lab-compute/IT power by chip.csv').exists() else Path('.')
+data_dir = Path('ai-lab-compute/data') if Path('ai-lab-compute/data').exists() else Path('data')
 
 owners_df = pd.read_csv(data_dir / 'nvidia_owners_cumulative_by_chip.csv')
 chip_power_df = pd.read_csv(data_dir / 'IT power by chip.csv')
 openai_df = pd.read_csv(data_dir / 'lab IT power.csv')
 openai_df['Date'] = pd.to_datetime(openai_df['Date'], format='%m/%d/%y')
 
-# IT power per GPU. The power CSV names Blackwell parts "GB200"/"GB300"; the
-# fleet data calls them "B200"/"B300", so we translate.
+# Watts per GPU = server power per GPU x IT overhead factor. We read the server
+# power per GPU (fixed hardware) and vary the overhead (sampled below). The CSV
+# names Blackwell parts "GB200"/"GB300"; the fleet data calls them "B200"/"B300".
 power_csv_to_chip_name = {'A100': 'A100', 'H100': 'H100/H200', 'GB200': 'B200', 'GB300': 'B300'}
-watts_per_gpu = {
-    power_csv_to_chip_name[row['Chip type']]: row['IT power per GPU (W)']
+server_power_per_gpu = {
+    power_csv_to_chip_name[row['Chip type']]: row['Server power per GPU (W)']
     for _, row in chip_power_df.iterrows()
     if row['Chip type'] in power_csv_to_chip_name
 }
+# Median watts per GPU (server power x the overhead's median). These drive the
+# chip-mix shares, which a shared overhead scales uniformly and so leaves unchanged;
+# only the final MW->count conversion feels the sampled overhead.
+OVERHEAD_MEDIAN = float(np.median(IT_OVERHEAD @ 20000))
+watts_per_gpu = {chip: server_power_per_gpu[chip] * OVERHEAD_MEDIAN for chip in CHIP_TYPES}
 
 # Microsoft's cumulative fleet, every quarter, as (date x chip type) tables.
 microsoft = owners_df[
@@ -146,7 +163,12 @@ for date in OPENAI_DATES:
     power_added_mw[date] = disclosed_power_mw[date] - previous
     previous = disclosed_power_mw[date]
 
-print('Watts per GPU (fixed): ', {c: f'{w:,.0f} W' for c, w in watts_per_gpu.items()})
+overhead_pct = sq.get_percentiles(IT_OVERHEAD @ 50000, [5, 50, 95])
+print(f'IT overhead factor (5th/median/95th): {overhead_pct[5]:.2f} / {overhead_pct[50]:.2f} / {overhead_pct[95]:.2f}')
+print('Watts per GPU (5th / median / 95th), server power x overhead:')
+for chip in CHIP_TYPES:
+    s = server_power_per_gpu[chip]
+    print(f'   {chip:10s} {s * overhead_pct[5]:,.0f} / {s * overhead_pct[50]:,.0f} / {s * overhead_pct[95]:,.0f} W')
 print('H100e per GPU (fixed): ', {c: round(v, 2) for c, v in h100e_per_gpu.items()})
 print('Disclosed power (MW):  ', {d.strftime('%Y'): int(p) for d, p in disclosed_power_mw.items()})
 
@@ -224,9 +246,11 @@ def chip_power_shares(lag_quarters):
     return default_shares, newest_shares
 
 
-def run_monte_carlo(new_chip_share, lag_quarters, total_power):
+def run_monte_carlo(new_chip_share, lag_quarters, total_power, it_overhead):
     """Per-year, per-chip chip counts and H100e for the given parameter samples
-    (each argument is a length-N array; total_power is a {date: array} dict)."""
+    (each argument is a length-N array; total_power is a {date: array} dict).
+    Watts per GPU = server power per GPU x it_overhead, one shared overhead per
+    sample; a higher overhead means fewer chips bought per disclosed MW."""
     default_shares, newest_shares = chip_power_shares(lag_quarters)
     results = {}
     for date in OPENAI_DATES:
@@ -235,7 +259,7 @@ def run_monte_carlo(new_chip_share, lag_quarters, total_power):
             # Blend the two mixes, then size the result by OpenAI's total power.
             share = (1 - new_chip_share) * default_shares[date][chip] + new_chip_share * newest_shares[date][chip]
             megawatts = total_power[date] * share
-            counts[chip] = megawatts * 1e6 / watts_per_gpu[chip]
+            counts[chip] = megawatts * 1e6 / (server_power_per_gpu[chip] * it_overhead)
             h100e[chip] = counts[chip] * h100e_per_gpu[chip]
         results[date] = {
             'counts': counts,
@@ -261,10 +285,15 @@ for lag in [0.0, 1.0, 2.0]:
 #   sweeps alternatives.
 # - **Deployment lag** — lognormal, 90% range 0.5–2 quarters (median 1).
 # - **Power definition factor** — is each disclosed figure IT power or gross?
-#   80% IT (a small residual band around 1.0), 20% gross (divided by a 1.1–1.3
+#   80% IT (a small residual band around 1.0), 20% gross (divided by a 1.1–1.7
 #   PUE). One shared draw across years, since it reflects how OpenAI reports.
 # - **Rounding jitter** — triangular ±50 MW per year, peaked at 0 (the 0.1 GW
 #   rounding step; the exact edges are less likely than a flat band).
+# - **IT overhead factor** — server power → IT power per GPU, median 1.14, 90% range
+#   ~1.0–1.35 (floored at 1.0). One shared draw; a lever with real upside.
+# - **Figure accuracy** — is the internal total-power number itself right? 90%
+#   range 0.9–1.2 (median ~1.04): undercounted providers push up, overstatement
+#   down. One shared draw, like the definition factor.
 
 # %%
 new_chip_share_prior = PARAMS['new_chip_share']
@@ -278,17 +307,25 @@ if_gross_power = 1 / PARAMS['gross_pue']  # gross: convert to IT by dividing by 
 P_GROSS = PARAMS['p_gross']
 power_definition_factor = sq.mixture([if_it_power, if_gross_power], [1 - P_GROSS, P_GROSS])
 
-ROUNDING_MW = 50.0  # disclosures are rounded to the nearest 0.1 GW
+# Is OpenAI's internal total-power figure itself accurate, setting aside rounding
+# and the IT-vs-gross question? Undercounted providers or newly-online capacity
+# push the true figure up; overstatement pushes it down.
+figure_accuracy_prior = PARAMS['figure_accuracy']
+
+ROUNDING_MW = PARAMS['rounding_mw']  # half-step of the disclosures' 0.1 GW rounding
 
 
 def sample_total_power(n):
-    """Total power per year: one shared power-definition factor times each
-    disclosure, plus that disclosure's own rounding jitter. The definition factor
-    is drawn once per sample (it reflects how OpenAI reports, so it's the same
-    every year); the jitter is independent per year and peaks at zero."""
+    """Total power per year: each disclosure plus its own rounding jitter, times
+    two shared factors — the power-definition factor (IT vs gross) and the
+    figure-accuracy factor (is the internal number itself right). Both are drawn
+    once per sample, since they reflect how OpenAI reports; the jitter is
+    independent per year and peaks at zero."""
     definition_factor = power_definition_factor @ n
+    accuracy_factor = figure_accuracy_prior @ n
     return {
-        date: (disclosed_power_mw[date] + (sq.triangular(-ROUNDING_MW, 0, ROUNDING_MW) @ n)) * definition_factor
+        date: (disclosed_power_mw[date] + (sq.triangular(-ROUNDING_MW, 0, ROUNDING_MW) @ n))
+        * definition_factor * accuracy_factor
         for date in OPENAI_DATES
     }
 
@@ -303,18 +340,20 @@ print(f'deployment lag central (median): {lag_central:.2f} quarters')
 # %% [markdown]
 # ## 4. Run the Monte Carlo
 #
-# All four inputs vary together, so each sample is one coherent scenario.
+# All six inputs vary together, so each sample is one coherent scenario.
 
 # %%
 new_chip_share = new_chip_share_prior @ N_SAMPLES
 lag_quarters = lag_prior @ N_SAMPLES
 total_power = sample_total_power(N_SAMPLES)
+it_overhead = IT_OVERHEAD @ N_SAMPLES
 
-mc = run_monte_carlo(new_chip_share, lag_quarters, total_power)
+mc = run_monte_carlo(new_chip_share, lag_quarters, total_power, it_overhead)
 
-# Deterministic reference: new_chip_share 0, no lag, nominal power = the main model.
+# Deterministic reference: new_chip_share 0, no lag, nominal power, median overhead = the main model.
 reference = run_monte_carlo(
-    np.array([0.0]), np.array([0.0]), {d: np.array([disclosed_power_mw[d]]) for d in OPENAI_DATES})
+    np.array([0.0]), np.array([0.0]), {d: np.array([disclosed_power_mw[d]]) for d in OPENAI_DATES},
+    np.array([OVERHEAD_MEDIAN]))
 reference_h100e = {d: reference[d]['total_h100e'][0] for d in OPENAI_DATES}
 
 print('Total H100e by year (5th / median / 95th), and the main-model reference:')
@@ -374,12 +413,26 @@ plt.show()
 # %%
 central_share = np.full(N_SAMPLES, new_chip_share_central)
 central_lag = np.full(N_SAMPLES, lag_central)
+central_overhead = np.full(N_SAMPLES, OVERHEAD_MEDIAN)
 nominal_power = {d: np.full(N_SAMPLES, disclosed_power_mw[d]) for d in OPENAI_DATES}
 
+# Nominal power scaled by one factor at a time (each a single shared draw across
+# years). total_power can't be reused for the definition row: it now bundles the
+# accuracy factor too.
+accuracy_samples = figure_accuracy_prior @ N_SAMPLES
+accuracy_only_power = {d: disclosed_power_mw[d] * accuracy_samples for d in OPENAI_DATES}
+definition_samples = power_definition_factor @ N_SAMPLES
+definition_jitter_power = {
+    d: (disclosed_power_mw[d] + (sq.triangular(-ROUNDING_MW, 0, ROUNDING_MW) @ N_SAMPLES)) * definition_samples
+    for d in OPENAI_DATES
+}
+
 decomposition = {
-    'new_chip_share only': run_monte_carlo(new_chip_share, central_lag, nominal_power),
-    'deployment lag only': run_monte_carlo(central_share, lag_quarters, nominal_power),
-    'power (factor + jitter) only': run_monte_carlo(central_share, central_lag, total_power),
+    'new_chip_share only': run_monte_carlo(new_chip_share, central_lag, nominal_power, central_overhead),
+    'deployment lag only': run_monte_carlo(central_share, lag_quarters, nominal_power, central_overhead),
+    'power definition (+ jitter) only': run_monte_carlo(central_share, central_lag, definition_jitter_power, central_overhead),
+    'IT overhead only': run_monte_carlo(central_share, central_lag, nominal_power, it_overhead),
+    'figure accuracy only': run_monte_carlo(central_share, central_lag, accuracy_only_power, central_overhead),
     'all combined': mc,
 }
 
@@ -421,7 +474,7 @@ priors = {
 }
 
 prior_h100e = {
-    name: run_monte_carlo(prior @ N_SAMPLES, lag_quarters, total_power)[last_date]['total_h100e']
+    name: run_monte_carlo(prior @ N_SAMPLES, lag_quarters, total_power, it_overhead)[last_date]['total_h100e']
     for name, prior in priors.items()
 }
 
@@ -455,18 +508,21 @@ for name in priors:
 # %%
 def total_power_with_gross_prob(n, p_gross):
     """Re-sample total power with a given probability that each disclosure is gross
-    rather than IT. Same structure as sample_total_power, just a different weight."""
+    rather than IT. Same structure as sample_total_power (including the
+    figure-accuracy factor), just a different gross weight."""
     factor = sq.mixture([if_it_power, if_gross_power], [1 - p_gross, p_gross])
     definition_factor = factor @ n
+    accuracy_factor = figure_accuracy_prior @ n
     return {
-        date: (disclosed_power_mw[date] + (sq.triangular(-ROUNDING_MW, 0, ROUNDING_MW) @ n)) * definition_factor
+        date: (disclosed_power_mw[date] + (sq.triangular(-ROUNDING_MW, 0, ROUNDING_MW) @ n))
+        * definition_factor * accuracy_factor
         for date in OPENAI_DATES
     }
 
 
 gross_probs = [0.0, 0.2, 0.5, 0.8]
 gross_h100e = {
-    p: run_monte_carlo(new_chip_share, lag_quarters, total_power_with_gross_prob(N_SAMPLES, p))[last_date]['total_h100e']
+    p: run_monte_carlo(new_chip_share, lag_quarters, total_power_with_gross_prob(N_SAMPLES, p), it_overhead)[last_date]['total_h100e']
     for p in gross_probs
 }
 

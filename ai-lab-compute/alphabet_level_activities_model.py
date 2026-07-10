@@ -44,9 +44,11 @@
 #   mostly on Google-owned TPUs, so Google is selling compute to itself. It
 #   almost certainly books this at *cost* (depreciation + amortization + operating
 #   expenses), **not** at a market GPU-hour rate with a profit margin — and TPUs
-#   are cheaper per FLOP than Nvidia. We anchor this to SemiAnalysis's TCO
-#   comparison. That makes these dollars buy *more* H100e-hours than the same
-#   dollars would at OpenAI or Anthropic, who rent at market rates.
+#   are cheaper per FLOP than Nvidia. We anchor the cost of *owning* Nvidia
+#   directly to SemiAnalysis's published owning-TCO estimates
+#   ([InferenceX](https://inferencex.semianalysis.com/inference)), then apply
+#   the TPU cost advantage. That makes these dollars buy *more* H100e-hours than
+#   the same dollars would at OpenAI or Anthropic, who rent at market rates.
 #
 # **Method.** For a given period,
 #
@@ -165,58 +167,81 @@ summary("Compute share of Alphabet-level activities", compute_share_samples);
 # with OpenAI's or Anthropic's cloud bills. Google runs DeepMind mostly on its own
 # TPUs and bills the cost internally — depreciation + amortization + operating
 # expenses — with **no cloud profit margin**. Google's self-built TPUs are also
-# cheaper per FLOP than renting Nvidia. We build the cost up in four steps,
-# anchored to SemiAnalysis's TCO comparison
-# ([TPU v7 analysis](https://newsletter.semianalysis.com/p/tpuv7-google-takes-a-swing-at-the)).
+# cheaper per FLOP than renting Nvidia. We build the cost up in three steps.
 #
-# **Step 1 — base: external Nvidia cloud price.** Market rate to rent one H100e
-# (Hopper, 3-year contract) is about **$1.50–2.00/GPU-hr**. This is a *price*: it
-# includes the cloud provider's margin.
+# **Step 1 — Nvidia owning-TCO anchor (SemiAnalysis InferenceX).** SemiAnalysis
+# publishes the direct total cost of ownership of an Nvidia GPU-hour for an
+# owner-operator, on [InferenceX](https://inferencex.semianalysis.com/inference)
+# ("Owning – Hyperscaler" basis, August 2025 pricing surveys & AI Cloud TCO
+# model). This is exactly the quantity we want — a hyperscaler's own all-in cost,
+# with no cloud margin to strip out. Converting each chip's per-GPU-hour TCO to
+# $/H100e-hr (GB200 and GB300 each ≈ 2.5 H100e):
 #
-# **Step 2 — strip the cloud margin.** Google bills DeepMind at cost, so we remove
-# the gross margin a cloud would charge. AI cloud margins are perhaps **20–45%**
-# (the low-30s is a common estimate; SemiAnalysis's TCO figures imply the higher
-# end). Nvidia internal cost = price × (1 − margin).
+# | Chip | TCO $/GPU-hr | H100e per GPU | TCO $/H100e-hr |
+# |------|-------------:|--------------:|---------------:|
+# | H100 | 1.30 | 1.0 | 1.30 |
+# | H200 | 1.41 | 1.0 | 1.41 |
+# | GB200 | 2.21 | 2.5 | 0.88 |
+# | GB300 | 2.34 | 2.5 | 0.94 |
 #
-# **Step 3 — TPU vs Nvidia cost advantage (from SemiAnalysis).** On a *TCO per
-# marketed 8-bit PFLOP* basis — the right normalization for H100e — SemiAnalysis
+# So Hopper costs about **$1.30–1.41 per H100e-hr** to own, and Blackwell's
+# better performance-per-TCO brings that down to **$0.88–0.94**. Google's Nvidia
+# fleet over FY 2025 – Q1 2026 is a Hopper/Blackwell mix shifting toward
+# Blackwell, so we take a 90% CI of **$0.90–1.40/H100e-hr**: a nearly-all-Blackwell
+# fleet at the low end, nearly-all-Hopper at the high end, which also leaves room
+# for SemiAnalysis model error either way.
+#
+# **Step 2 — TPU vs Nvidia cost advantage (from SemiAnalysis).** On a *TCO per
+# marketed 8-bit PFLOP* basis — the right normalization for H100e — SemiAnalysis's
+# [TPU v7 analysis](https://newsletter.semianalysis.com/p/tpuv7-google-takes-a-swing-at-the)
 # puts TPU v7 (internal) at **$0.28** vs Nvidia GB200 at **$0.46** and GB300 at
 # **$0.55**. So a TPU delivers the same FP8 throughput at roughly **0.51–0.76×**
 # Nvidia's cost (central ~0.61). Generalizing "TPU v7 : GB200" to "TPU : Nvidia
-# fleet-wide," we take **0.50–0.78**. TPU internal cost = Nvidia internal cost ×
+# fleet-wide," we take **0.50–0.78**. TPU internal cost = Nvidia owning TCO ×
 # this ratio.
 #
-# **Step 4 — blend by fleet mix.** DeepMind's fleet is TPU-heavy but part is
+# **Step 3 — blend by fleet mix.** DeepMind's fleet is TPU-heavy but part is
 # Nvidia (Google overall is ~¾ TPU by H100e; DeepMind likely at least that
 # TPU-weighted). We take the **TPU share at 0.70–0.90** and blend the two costs.
 #
-# The result lands around **$0.8/H100e-hr** — above the naive bottom-up (~$0.67)
-# used previously, and closer to the level needed to reconcile with the top-down
-# DeepMind model. As a cross-check, converting SemiAnalysis's TCO directly gives
-# TPU-v7-internal ≈ $0.55/H100e-hr and GB200 ≈ $0.91/H100e-hr.
+# The result lands just under **$0.8/H100e-hr**. As a consistency check, the two
+# SemiAnalysis sources agree well where they overlap: the TPU-v7 newsletter's
+# GB200 TCO converts to $0.46 × 1.979 ≈ **$0.91/H100e-hr**, vs **$0.88** from the
+# InferenceX numbers above (GB300 is less tight: $1.09 vs $0.94).
 
 # %%
-# Step 1: external Nvidia cloud market price for one H100e-hour (Hopper anchor).
-nvidia_market_price = PARAMS["nvidia_market_price"] @ N_SAMPLES
+# Step 1: Nvidia owning TCO per H100e-hour, anchored to SemiAnalysis InferenceX
+# ("Owning - Hyperscaler" basis, August 2025). Show the anchor points first.
+inferencex_owning_tco = {
+    # chip: (TCO $ per GPU-hr, H100e per GPU)
+    "H100": (1.30, 1.0),
+    "H200": (1.41, 1.0),
+    "GB200": (2.21, 2.5),
+    "GB300": (2.34, 2.5),
+}
+print("SemiAnalysis InferenceX owning TCO, converted to $/H100e-hr:")
+for chip, (tco_per_gpu, h100e_per_gpu) in inferencex_owning_tco.items():
+    print(f"  {chip:6s} ${tco_per_gpu:.2f}/GPU-hr / {h100e_per_gpu:.1f} H100e"
+          f" = ${tco_per_gpu / h100e_per_gpu:.2f}/H100e-hr")
+print()
 
-# Step 2: strip the cloud gross margin to get Nvidia cost-basis on Google's books.
-cloud_margin = PARAMS["cloud_margin"] @ N_SAMPLES
-nvidia_internal_cost = nvidia_market_price * (1 - cloud_margin)
+nvidia_tco = PARAMS["nvidia_tco"] @ N_SAMPLES
 
-# Step 3: TPUs are cheaper per 8-bit FLOP (SemiAnalysis TPU-v7 : Nvidia TCO ratio).
+# Step 2: TPUs are cheaper per 8-bit FLOP (SemiAnalysis TPU-v7 : Nvidia TCO ratio).
 tpu_vs_nvidia_tco = PARAMS["tpu_vs_nvidia_tco"] @ N_SAMPLES
-tpu_internal_cost = nvidia_internal_cost * tpu_vs_nvidia_tco
+tpu_internal_cost = nvidia_tco * tpu_vs_nvidia_tco
 
-# Step 4: blend by DeepMind's TPU-heavy-but-not-all-TPU fleet mix.
+# Step 3: blend by DeepMind's TPU-heavy-but-not-all-TPU fleet mix.
 tpu_share = PARAMS["tpu_share"] @ N_SAMPLES
-cost_samples = tpu_share * tpu_internal_cost + (1 - tpu_share) * nvidia_internal_cost
+cost_samples = tpu_share * tpu_internal_cost + (1 - tpu_share) * nvidia_tco
 
-summary("Nvidia internal cost $/H100e-hr", nvidia_internal_cost)
+summary("Nvidia owning TCO $/H100e-hr", nvidia_tco)
 summary("TPU internal cost $/H100e-hr", tpu_internal_cost)
 summary("Blended internal $/H100e-hour", cost_samples)
 
-# Cross-check against SemiAnalysis TCO converted to $/H100e-hr (1 H100e = 1.979 FP8 PFLOP/s).
-print("\nSemiAnalysis TCO cross-check ($/H100e-hr):")
+# Consistency check: the TPU-v7 newsletter quotes TCO per marketed 8-bit PFLOP;
+# converting at 1 H100e = 1.979 FP8 PFLOP/s should roughly match InferenceX.
+print("\nSemiAnalysis TPU-v7 newsletter TCO, converted ($/H100e-hr):")
 for chip, tco_per_pflop in [("GB200", 0.46), ("GB300", 0.55),
                             ("TPU v7 internal", 0.28), ("TPU v7 external", 0.35)]:
     print(f"  {chip:18s} {tco_per_pflop * 1.979:.2f}")
@@ -303,6 +328,61 @@ ax.legend(loc="upper right")
 plt.show()
 
 # %% [markdown]
+# ## Comparison with the previous margin-stripping approach
+#
+# The previous version of this model reached Nvidia's internal cost indirectly:
+# start from the market price to *rent* an H100e ($1.50–2.00/hr, a price that
+# includes the cloud provider's profit) and strip an assumed cloud gross margin
+# (20–45%). That required a judgment call about margins to back out a quantity
+# SemiAnalysis now publishes directly. The old chain is kept below as literal
+# in-notebook distributions (its rows were removed from the params sheet); the
+# TPU-ratio and fleet-mix samples are reused so the only difference between old
+# and new is the Nvidia cost anchor.
+
+# %%
+# Old approach: market rental price with an assumed cloud gross margin stripped out.
+old_market_price = sq.to(1.5, 2.0) @ N_SAMPLES
+old_cloud_margin = sq.to(0.2, 0.45) @ N_SAMPLES
+old_nvidia_cost = old_market_price * (1 - old_cloud_margin)
+
+# Same downstream steps as the new model, swapping only the Nvidia anchor.
+old_cost_samples = (tpu_share * old_nvidia_cost * tpu_vs_nvidia_tco
+                    + (1 - tpu_share) * old_nvidia_cost)
+
+summary("OLD Nvidia internal cost $/H100e-hr (price minus margin)", old_nvidia_cost)
+summary("NEW Nvidia owning TCO $/H100e-hr (InferenceX anchor)", nvidia_tco)
+print()
+summary("OLD blended internal $/H100e-hour", old_cost_samples)
+summary("NEW blended internal $/H100e-hour", cost_samples)
+
+# %%
+old_h100e_q1_2026 = (spend_q1_2026 * compute_share_samples
+                     / old_cost_samples / hours_q1_2026)
+old_h100e_fy_2025 = (spend_fy_2025 * compute_share_samples
+                     / old_cost_samples / hours_fy_2025)
+
+p_old_q1 = summary("OLD H100e — Q1 2026", old_h100e_q1_2026)
+p_old_fy = summary("OLD H100e — FY 2025 avg", old_h100e_fy_2025)
+print()
+for label, p_old, p_new in [("Q1 2026", p_old_q1, p_q1),
+                            ("FY 2025", p_old_fy, p_fy)]:
+    shift = (p_new[50] / p_old[50] - 1) * 100
+    print(f"{label}: median {fmt(p_old[50])} -> {fmt(p_new[50])} ({shift:+.0f}%)")
+
+# %%
+fig, ax = plt.subplots(figsize=(9, 5))
+bins = np.linspace(0, 4, 80)
+ax.hist(old_h100e_q1_2026 / 1e6, bins=bins, alpha=0.55, color="#B0885E",
+        label=f"old: price minus margin (median {fmt(p_old_q1[50])})")
+ax.hist(h100e_q1_2026 / 1e6, bins=bins, alpha=0.55, color="#7AC4C0",
+        label=f"new: InferenceX owning TCO (median {fmt(p_q1[50])})")
+ax.set_xlabel("Average H100e used (millions)")
+ax.set_ylabel("Monte Carlo samples")
+ax.set_title("Q1 2026 estimate: old vs new Nvidia cost anchor", weight="bold")
+ax.legend()
+plt.show()
+
+# %% [markdown]
 # ## Sanity checks & caveats
 #
 # - **Consistency with the DeepMind top-down model.** The separate DeepMind model
@@ -322,8 +402,10 @@ plt.show()
 #   is strictly a training/research figure — not comparable to a lab's *total*
 #   fleet.
 # - **Cost basis, not price.** The output is not comparable to OpenAI's/Anthropic's
-#   cloud spend converted at market GPU-hour rates; multiply the internal cost by
-#   ~1.3–1.5× to get a market-equivalent, which would *lower* the H100e count.
+#   cloud spend converted at market GPU-hour rates. Market H100 rentals run
+#   ~$1.50–2.00/hr against a ~$1.30 owning TCO, so multiply the internal cost by
+#   roughly 1.2–1.5× to get a market-equivalent, which would *lower* the H100e
+#   count.
 
 # %%
 print("Summary — average H100e used for Alphabet-level activities\n")

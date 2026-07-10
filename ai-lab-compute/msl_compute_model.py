@@ -19,7 +19,8 @@
 # A Monte Carlo estimate of Meta Superintelligence Labs' (MSL) compute at the
 # end of 2025, in H100-equivalents (H100e).
 #
-# MSL compute is built up as a product of three pieces:
+# MSL compute is built up as a product of three pieces, plus a rented-cloud
+# top-up:
 #
 # 1. **Total Meta owned H100e** — Nvidia fleet + AMD Instinct fleet, sampled
 #    independently from the lognormal CIs in the dashboard.
@@ -28,20 +29,25 @@
 # 3. **MSL share of operational compute** — the split between frontier AI work
 #    (MSL training/R&D plus Meta AI inference) and Meta's core-business ML
 #    (ad/feed recommenders and other production models).
+# 4. **Rented cloud compute** — whatever slice of the CoreWeave / Google /
+#    Oracle deals was already delivering at year-end, from a spend run-rate
+#    prior times a rental-price conversion.
 #
 # The model is simpler than the DeepMind one because Meta's fleet is almost
 # entirely internal at end-2025: Meta doesn't rent meaningful compute to
-# external customers, and its own cloud rentals (Google / Oracle / CoreWeave
-# deals worth $10–20B signed in late 2025–2026) hadn't ramped yet. So owned ≈
-# used, and there is no cloud / non-cloud split:
+# external customers, and its own cloud rentals (CoreWeave / Google / Oracle
+# deals worth $10–20B each, signed Sept–Oct 2025) had mostly not ramped yet.
+# Owned ≈ used for the core fleet; what may have come online by December is a
+# small, uncertain **rented cloud** term with a real chance of being zero:
 #
-# > `MSL H100e = total_owned × deployment_lag × MSL_share`
+# > `MSL H100e = total_owned × deployment_lag × MSL_share + rented_cloud`
 #
 # Meta's in-house MTIA accelerator is excluded (low volumes through 2025).
 #
-# **All inputs are lognormal.** Each parameter's low/high bounds are read as the
-# **90% credible interval** (5th–95th percentile), so the lognormal median lands
-# near the geometric mean of the two bounds.
+# **Inputs are lognormal** unless noted — each parameter's low/high bounds are
+# read as the **90% credible interval** (5th–95th percentile), so the lognormal
+# median lands near the geometric mean of the two bounds. The exception is the
+# rented-cloud spend, a zero-inflated lognormal built in section 4.
 #
 
 # %%
@@ -178,22 +184,75 @@ ax.set_ylabel("Monte Carlo samples")
 ax.set_title("MSL's share of operational Meta compute", weight="bold")
 plt.show()
 
-# %%
-msl_compute = operational * msl_share_samples
+# %% [markdown]
+# ## 4. Rented cloud compute
+#
+# In September–October 2025 Meta signed large multi-year cloud deals —
+# CoreWeave ($14B through 2031), Google (~$10B over six years), Oracle (~$20B
+# reported) — worth roughly $7.5B/yr combined at full run rate. Very little of
+# that was delivering by December: CoreWeave's disclosures cap Meta's 2025
+# revenue below $0.5B (under 10% of CoreWeave's ~$5B year) and its Q1-2026 run
+# rate below ~$0.8B/yr — about a third of that deal's full rate, a quarter
+# after signing.
+#
+# The spend rate is therefore a **zero-inflated lognormal**, built from two
+# sheet rows: a point mass at $0 (the chance nothing was delivering yet) and,
+# if capacity was flowing, a lognormal run rate hard-capped at the ~$5B/yr
+# bound the CoreWeave ramp gap implies. Dollars then convert to H100e through
+# a single **price per H100e-hour**, anchored on the rack-scale Blackwells the
+# cloud providers are deploying.
 
+# %%
+HOURS_PER_YEAR = 8760  # rented capacity bills around the clock
+
+# 25% chance nothing was online; otherwise to(0.5, 3.5) capped at $5B/yr.
+p_nothing_online = PARAMS["cloud_p_nothing_online"]  # const row -> plain float
+cloud_spend = sq.zero_inflated(p_nothing_online, PARAMS["cloud_spend_run_rate"])
+cloud_spend_samples = cloud_spend @ N_SAMPLES  # $B/yr
+
+# Rental price per H100e-hour, anchored on SemiAnalysis InferenceX (August
+# 2025 pricing surveys, https://inferencex.semianalysis.com/inference):
+# GB200 $3.30/GPU-hr and GB300 $3.96/GPU-hr, both
+# ~2.5 H100e per GPU, so the GB200–GB300 range gives a 90% CI of $1.32–1.58
+# per H100e-hour.
+# - InferenceX labels these "TCO" but the dashboard is set to 3-year rental
+#   prices; Meta's deals run 5–6 years, so 3-year pricing is only a proxy.
+# - Pricing on very large cloud deals spiked in spring 2026 (e.g. the SpaceX
+#   deals), but that repricing postdates Meta's fall-2025 contracts.
+price_per_h100e_hour = sq.to(3.30 / 2.5, 3.96 / 2.5)
+
+rented_h100e = (cloud_spend_samples * 1e9
+                / ((price_per_h100e_hour @ N_SAMPLES) * HOURS_PER_YEAR))
+
+print(f"P(no rented capacity) = {np.mean(cloud_spend_samples == 0):.0%}\n")
+summary("Cloud spend run rate ($B/yr)", cloud_spend_samples)
+summary("Rented H100e", rented_h100e);
+
+# %% [markdown]
+# Rented capacity is billed as it is delivered, so no deployment-lag haircut
+# applies. The reporting describes these as AI-infrastructure deals (CNBC on
+# the Google deal), so the whole term is counted toward MSL rather than split
+# with the recommender stack.
+
+# %%
+msl_owned_slice = operational * msl_share_samples
+msl_compute = msl_owned_slice + rented_h100e
+
+summary("MSL H100e (owned slice only)", msl_owned_slice)
 summary("MSL H100e", msl_compute);
 
 # %% [markdown]
 # ## Monte Carlo summary
 #
-# The MSL total is exactly the product of three sampled parameters:
+# The MSL total is the product of three sampled parameters, plus the rented
+# cloud term:
 #
-# > `MSL H100e = total_owned × deployment_lag × MSL_share`
+# > `MSL H100e = total_owned × deployment_lag × MSL_share + rented_cloud`
 #
 # Unlike the DeepMind model there is no blended-fraction step — the share is
 # sampled directly. Each row below shows one input parameter: the error bar
 # spans the 90% credible interval, with a dot at the median. The left column
-# reads out the multiplication chain at medians.
+# reads out the chain at medians.
 
 # %%
 def label_spans(ax, x, y, spans, pad_px=7):
@@ -233,6 +292,11 @@ sections = [
          rows=[("MSL share of operational compute", msl_share_samples)],
          scale=1.0,
          axis_labels=("0%", "100% of operational")),
+    dict(kicker="RENTED CLOUD",
+         headline=f"+ {fmt(np.median(rented_h100e))}",
+         rows=[("Rented H100e (zero when nothing online)", rented_h100e)],
+         scale=400 * K,
+         axis_labels=("0", "400k H100e")),
 ]
 
 ROW_H, FOOTER_H = 1.0, 0.7
@@ -292,9 +356,9 @@ plt.show()
 #
 # The median lands a bit under 1M H100e — consistent with the bottom line in
 # the modeling summary (MSL ≈ half of Meta's ~2.3M owned, less after
-# deployment lag). Even the 95th percentile sits below OpenAI's central ~1.7M
-# estimate, supporting the conclusion that MSL likely had less compute than
-# OpenAI at end-2025.
+# deployment lag, plus a small rented-cloud top-up). Even the 95th percentile
+# sits below OpenAI's central ~1.7M estimate, supporting the conclusion that
+# MSL likely had less compute than OpenAI at end-2025.
 
 # %%
 fig, ax = plt.subplots(figsize=(11, 4.6))
@@ -324,7 +388,7 @@ for name, samples, y in [("Owned", total_owned, 2),
                     xerr=[[(med - lo) / 1e6], [(hi - med) / 1e6]],
                     fmt="none", ecolor="#1d2f54", elinewidth=1.6,
                     capsize=5, capthick=1.6, zorder=3)
-        spans.append((f"· {share_of_op:.0%} of operational",
+        spans.append((f"· {share_of_op:.0%} of operational + rented",
                       dict(fontsize=9.5, color="#2B6CB8")))
     else:
         ax.barh(y, med / 1e6, height=bar_h, color="#C9C9C9")
@@ -350,8 +414,8 @@ plt.show()
 # late-2025 pivot had actually shifted allocation by December, and what
 # counts as MSL at all. Here we re-run the model across that ladder — from
 # the tight analyst-anchored band out to the 0.1–0.9 hard bounds — reusing
-# the same owned-fleet and deployment-lag draws so the only thing that
-# changes is the share spread:
+# the same owned-fleet, deployment-lag, and rented-cloud draws so the only
+# thing that changes is the share spread:
 #
 # - **0.40–0.60** — tight: the analyst split at face value.
 # - **0.33–0.80** — baseline (the canonical prior in the sheet).
@@ -364,8 +428,9 @@ plt.show()
 # Each bar runs to the median of the resulting MSL distribution, with an
 # error bar spanning the 90% interval. Because every row centers near ~50:50,
 # the median barely moves — the band width mainly stretches the tails.
-# Even the widest cases top out around 1.6M at the 95th percentile,
-# approaching but not reaching OpenAI's central ~1.7M.
+# With the rented-cloud term included, the widest (uniform) case's 95th
+# percentile now just reaches OpenAI's central ~1.7M; the lognormal rows
+# stay below it.
 
 # %%
 # Share CIs from tight to maximal. The lognormal rows keep their geometric
@@ -383,7 +448,8 @@ share_scenarios = [
 rows = []
 print(f"{'share CI':>28}  {'5th':>8}  {'median':>8}  {'95th':>8}  {'90% CI width':>13}")
 for label, share_samples in share_scenarios:
-    pc = sq.get_percentiles(operational * share_samples, percentiles=[5, 50, 95])
+    pc = sq.get_percentiles(operational * share_samples + rented_h100e,
+                            percentiles=[5, 50, 95])
     rows.append((label, pc[5], pc[50], pc[95]))
     print(f"{label:>28}  {fmt(pc[5]):>8}  {fmt(pc[50]):>8}  {fmt(pc[95]):>8}  "
           f"{fmt(pc[95] - pc[5]):>13}")
@@ -453,7 +519,7 @@ lag_scenarios = [
 
 rows = []
 for lag_q, ratio in lag_scenarios:
-    msl = total_owned * ratio * msl_share_samples
+    msl = total_owned * ratio * msl_share_samples + rented_h100e
     pc = sq.get_percentiles(msl, percentiles=[5, 50, 95])
     rows.append((lag_q, ratio, pc[5], pc[50], pc[95]))
 

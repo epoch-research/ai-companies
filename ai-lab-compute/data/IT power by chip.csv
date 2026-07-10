@@ -1,0 +1,5 @@
+Chip type,Server power rating (W),Server size,Server power per GPU (W),IT power per GPU (W),IT power per GPU (5th pct W),IT power per GPU (95th pct W),Notes
+A100,6500,8,812.5,926,812,1096,"DGX A100 server 6.5 kW. IT power per GPU = (server power / GPUs per server) x IT overhead factor. Overhead factor: median 1.14, 5th/95th 1.000/1.349 (floor 1.0). Source: Colossus calculations sheet (https://docs.google.com/spreadsheets/d/1aXs4vx7AMrzUIR3YeBvJRAD_rmDiioY9zR95DZdDa_s/edit?gid=386717209#gid=386717209), ultimately from Epoch AI data centers (https://epoch.ai/data/ai-data-centers)."
+H100,10200,8,1275.0,1453,1275,1721,"DGX H100 server 10.2 kW. Overridden to server power x overhead for consistency (was 1389 W, a bespoke SemiAnalysis networking figure)."
+GB200,132000,72,1833.3,2090,1833,2474,GB200 NVL72 server 132 kW (median).
+GB300,140000,72,1944.4,2217,1944,2624,GB300 NVL72 server 140 kW.

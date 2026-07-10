@@ -26,6 +26,10 @@
 # power snapshot, because the fleet grew through the year (same gap the OpenAI
 # spend vs. power models showed).
 #
+# A companion notebook, `anthropic_2024_backcast`, runs this machinery in reverse
+# to estimate **end-2024** (no power figure exists for that date). That backcast
+# was originally developed here as §9 and now lives there.
+#
 # The fleet is split into just **two buckets** (ignoring TPU for now, per the
 # brief):
 #
@@ -561,7 +565,17 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## 9. Takeaways
+# ## 9. End-2024 backcast — moved to its own notebook
+#
+# The backcast originally developed here as §9 (power-anchored end-2025 fleet ×
+# spend run-rate ratio × 2024/2025 price ratio → ~250k H100e at end-2024) now
+# lives in **`anthropic_2024_backcast.py`**, with a plain-language walkthrough,
+# printed and charted intermediates, the SemiAnalysis quarterly cross-check, and
+# the factor decomposition. It reuses this notebook's spend anchors and the
+# section-3 run-rate machinery unchanged.
+
+# %% [markdown]
+# ## 10. Takeaways
 #
 # - **Two outputs from the same dollars.** The 2025 *full-year average* (≈0.57M
 #   H100e at 55% Trainium) describes the year as a whole; the *end-2025 snapshot*
@@ -580,6 +594,10 @@ plt.show()
 #   within the year. The shape is the bigger unknown for the snapshot — two annual
 #   totals don't say whether spend ramped early or late, and that alone swings the
 #   year-end run-rate by a wide margin.
+# - **The end-2024 backcast now lives in `anthropic_2024_backcast`.** Sliding the
+#   power-anchored end-2025 fleet down the spend curve puts end-2024 at ~250k
+#   H100e (90% CI ~125k–430k); see that notebook for the plain-language
+#   walkthrough, the SemiAnalysis cross-checks, and the factor decomposition.
 # - This stays a rough alternate. The cleanest ways to tighten it are a better
 #   Trainium markup estimate, a firmer Trainium-share figure (via the chip-count
 #   cross-check), and a within-year (e.g. quarterly) spend figure to pin the growth

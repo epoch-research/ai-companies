@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frontier lab compute — chart &amp; model walkthrough</title>
+<style>
+  :root {
+    --bg: #F2FAF9;
+    --card: #FFFFFF;
+    --border: #E2EEEE;
+    --hairline: #EBF5F4;
+    --text: #07171A;
+    --secondary: #3E555E;
+    --muted: #5C737B;
+    --ink: #162B32;          /* chart whiskers and CI caps */
+    --grid: #E2EEEE;
+    --axis: #CCD8D9;
+    --track: #EBF5F4;
+    --tip-shadow: rgba(7, 23, 26, 0.14);
+    --chip-hover: #F2FAF9;
+    /* Lab colors — Epoch organizationColors, validated for the light surface */
+    --c-openai: #E03D90;
+    --c-google-deepmind: #00A5A6;
+    --c-anthropic: #6A3ECB;
+    --c-meta-superintelligence-labs: #FC6538;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0A171B;
+      --card: #0F2127;
+      --border: #1E3840;
+      --hairline: #162B32;
+      --text: #E7F2F1;
+      --secondary: #A9C0C4;
+      --muted: #7E979D;
+      --ink: #D5E6E5;
+      --grid: #17303792;
+      --axis: #2B4A53;
+      --track: #162B32;
+      --tip-shadow: rgba(0, 0, 0, 0.45);
+      --chip-hover: #132931;
+      /* Dark variants validated against the dark card surface: purple raised,
+         orange deepened; pink and teal are on-brand unchanged. */
+      --c-anthropic: #7B4FD8;
+      --c-meta-superintelligence-labs: #F25322;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0A171B;
+    --card: #0F2127;
+    --border: #1E3840;
+    --hairline: #162B32;
+    --text: #E7F2F1;
+    --secondary: #A9C0C4;
+    --muted: #7E979D;
+    --ink: #D5E6E5;
+    --grid: #17303792;
+    --axis: #2B4A53;
+    --track: #162B32;
+    --tip-shadow: rgba(0, 0, 0, 0.45);
+    --chip-hover: #132931;
+    --c-anthropic: #7B4FD8;
+    --c-meta-superintelligence-labs: #F25322;
+  }
+  :root[data-theme="light"] {
+    --bg: #F2FAF9;
+    --card: #FFFFFF;
+    --border: #E2EEEE;
+    --hairline: #EBF5F4;
+    --text: #07171A;
+    --secondary: #3E555E;
+    --muted: #5C737B;
+    --ink: #162B32;
+    --grid: #E2EEEE;
+    --axis: #CCD8D9;
+    --track: #EBF5F4;
+    --tip-shadow: rgba(7, 23, 26, 0.14);
+    --chip-hover: #F2FAF9;
+    --c-anthropic: #6A3ECB;
+    --c-meta-superintelligence-labs: #FC6538;
+  }
+
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Messina Sans', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    margin: 0;
+    padding: 40px 20px 56px;
+  }
+  .page { max-width: 980px; margin: 0 auto; }
+
+  a { color: var(--secondary); }
+  :focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+
+  /* ── Masthead ─────────────────────────────────────────────────────────── */
+  .kicker {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 10px;
+  }
+  .masthead h1 {
+    font-size: 24px; font-weight: 600; letter-spacing: -0.01em;
+    margin: 0 0 8px; text-wrap: balance;
+  }
+  .masthead .lede {
+    font-size: 13.5px; line-height: 1.55; color: var(--secondary);
+    margin: 0 0 24px; max-width: 74ch;
+  }
+
+  /* ── Cards ────────────────────────────────────────────────────────────── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px 28px 18px;
+    margin-bottom: 22px;
+  }
+
+  /* ── Chart card ───────────────────────────────────────────────────────── */
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 2px 0 16px; }
+  .legend-item {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 13px; color: var(--secondary);
+  }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+
+  .chart-scroll { overflow-x: auto; }
+  .chart-scroll svg {
+    display: block; width: 100%; min-width: 640px; height: auto;
+    font-family: inherit;
+  }
+  svg .gridline { stroke: var(--grid); stroke-width: 1; }
+  svg .gridline.zero { stroke: var(--axis); }
+  svg .tick-label { fill: var(--muted); font-size: 12.5px; }
+  svg .axis-title { fill: var(--secondary); font-size: 12.5px; }
+  svg .year-label { fill: var(--secondary); font-size: 13px; }
+  svg .bar-value { fill: var(--secondary); font-size: 11.5px; }
+  svg .whisk { stroke: var(--ink); stroke-width: 1.5; }
+  svg .bar { cursor: pointer; }
+  svg .bar:hover { filter: brightness(0.92); }
+  svg .bar:focus { outline: none; }
+  svg .bar:focus-visible, svg .bar.focused { stroke: var(--ink); stroke-width: 1.5px; }
+  .lab-openai { fill: var(--c-openai); }
+  .lab-google-deepmind { fill: var(--c-google-deepmind); }
+  .lab-anthropic { fill: var(--c-anthropic); }
+  .lab-meta-superintelligence-labs { fill: var(--c-meta-superintelligence-labs); }
+  .bg-openai { background: var(--c-openai); }
+  .bg-google-deepmind { background: var(--c-google-deepmind); }
+  .bg-anthropic { background: var(--c-anthropic); }
+  .bg-meta-superintelligence-labs { background: var(--c-meta-superintelligence-labs); }
+
+  .chart-footnote {
+    font-size: 12px; line-height: 1.5; color: var(--muted);
+    border-top: 1px solid var(--hairline); margin: 10px 0 0; padding-top: 10px;
+  }
+
+  /* ── Data table ───────────────────────────────────────────────────────── */
+  details.datatable { margin-top: 12px; }
+  details.datatable summary {
+    font-size: 12.5px; color: var(--secondary); cursor: pointer;
+    width: fit-content; border-radius: 4px; padding: 2px 4px;
+  }
+  details.datatable summary:hover { color: var(--text); }
+  .table-scroll { overflow-x: auto; margin-top: 8px; }
+  table.values {
+    border-collapse: collapse; font-size: 12.5px; min-width: 480px;
+    font-variant-numeric: tabular-nums;
+  }
+  table.values caption {
+    text-align: left; font-size: 11px; color: var(--muted); padding-bottom: 6px;
+  }
+  table.values th, table.values td {
+    padding: 5px 14px 5px 0; border-bottom: 1px solid var(--hairline);
+    text-align: right; white-space: nowrap;
+  }
+  table.values th { color: var(--muted); font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.06em; }
+  table.values th:first-child, table.values td:first-child { text-align: left; }
+  table.values td:first-child { color: var(--text); }
+  table.values td { color: var(--secondary); }
+
+  /* ── Walkthrough band ─────────────────────────────────────────────────── */
+  .walkthrough-head { margin: 34px 0 18px; }
+  .walkthrough-head h2 {
+    font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 6px;
+  }
+  .walkthrough-head p {
+    font-size: 13.5px; line-height: 1.55; color: var(--secondary);
+    margin: 0 0 14px; max-width: 78ch;
+  }
+  .walkthrough-head code {
+    font-size: 12px; background: var(--hairline); border-radius: 4px;
+    padding: 1px 4px;
+  }
+  nav.labs { display: flex; flex-wrap: wrap; gap: 8px; }
+  nav.labs a {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12.5px; color: var(--secondary); text-decoration: none;
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 5px 12px; background: var(--card);
+    font-variant-numeric: tabular-nums;
+  }
+  nav.labs a:hover { background: var(--chip-hover); color: var(--text); }
+
+  /* ── Walkthrough sections ─────────────────────────────────────────────── */
+  section.lab { scroll-margin-top: 16px; }
+  section.lab > header {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px;
+    margin-bottom: 4px;
+  }
+  section.lab > header .swatch { align-self: center; }
+  section.lab h3 { font-size: 16.5px; font-weight: 600; margin: 0; }
+  section.lab .headline { font-size: 13px; color: var(--secondary); font-variant-numeric: tabular-nums; }
+  section.lab .headline b { color: var(--text); font-weight: 600; }
+  section.lab .badge {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px;
+  }
+  section.lab .backlink {
+    margin-left: auto; font-size: 11.5px; color: var(--muted);
+    text-decoration: none;
+  }
+  section.lab .backlink:hover { color: var(--text); text-decoration: underline; }
+  .sec-openai { --lab: var(--c-openai); }
+  .sec-google-deepmind { --lab: var(--c-google-deepmind); }
+  .sec-anthropic { --lab: var(--c-anthropic); }
+  .sec-meta-superintelligence-labs { --lab: var(--c-meta-superintelligence-labs); }
+
+  .group { border-top: 1px solid var(--hairline); padding: 10px 0 12px; margin-top: 12px; }
+  .group:first-of-type { border-top: none; }
+  .row, .ghead, .gfoot {
+    display: grid; grid-template-columns: 240px 1fr 205px;
+    gap: 4px 16px; align-items: center;
+  }
+  .ghead .gkicker {
+    font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .row { padding: 5px 0; }
+  .lbl .meta {
+    font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .lbl .name { font-size: 12.5px; color: var(--secondary); line-height: 1.3; }
+  .row.final .lbl .name { font-weight: 600; color: var(--text); }
+  .lbl .expr { font-size: 11px; color: var(--muted); line-height: 1.35; margin-top: 1px; }
+
+  .track { position: relative; height: 26px; cursor: default; }
+  .track .rail {
+    position: absolute; left: 0; right: 0; top: 50%; height: 5px;
+    transform: translateY(-50%); background: var(--track); border-radius: 2.5px;
+  }
+  .track .ci, .track .cap {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    background: var(--lab); border-radius: 1px;
+  }
+  .track .ci { height: 2px; }
+  .track .cap { width: 2px; height: 12px; }
+  .track .dot {
+    position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%;
+    transform: translate(-50%, -50%); background: var(--lab);
+    box-shadow: 0 0 0 2px var(--card);
+  }
+  .row.final .track .dot { width: 11px; height: 11px; }
+  .track .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--hairline); }
+
+  .val {
+    font-size: 12px; color: var(--muted); text-align: right;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .val b { font-size: 12.5px; font-weight: 600; color: var(--text); }
+
+  .gfoot { margin-top: 2px; }
+  .axisrow { position: relative; height: 18px; }
+  .axisrow .stub { position: absolute; top: 0; width: 1px; height: 4px; background: var(--axis); }
+  .axisrow .tlabel {
+    position: absolute; top: 5px; font-size: 10px; color: var(--muted);
+    transform: translateX(-50%); white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Tooltips ─────────────────────────────────────────────────────────── */
+  .tooltip {
+    position: fixed; display: none; z-index: 10;
+    background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 2px 10px var(--tip-shadow);
+    padding: 8px 11px; font-size: 12.5px; line-height: 1.55; color: var(--text);
+    font-variant-numeric: tabular-nums; max-width: 260px;
+  }
+  .tooltip b { font-weight: 600; }
+  .tooltip .muted { color: var(--muted); }
+  #tip-chart { pointer-events: auto; }
+  #tip-chart .tip-link {
+    display: inline-block; margin-top: 5px; font-size: 12px; font-weight: 600;
+    color: var(--secondary);
+  }
+  #tip-chart .tip-link:hover { color: var(--text); }
+  #tip-step { pointer-events: none; max-width: 280px; font-size: 12px; }
+
+  /* ── Footer ───────────────────────────────────────────────────────────── */
+  .page > footer {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12px; flex-wrap: wrap;
+    font-size: 12px; color: var(--muted); margin-top: 26px;
+  }
+  .page > footer a { color: var(--secondary); }
+  .wordmark {
+    font-weight: 600; font-size: 11px; letter-spacing: 0.15em;
+    color: var(--muted); white-space: nowrap;
+  }
+
+  @media (max-width: 720px) {
+    body { padding: 24px 14px 40px; }
+    .card { padding: 18px 16px 14px; }
+    .row, .ghead, .gfoot { grid-template-columns: 1fr; gap: 2px; }
+    .val { text-align: left; }
+    .ghead .gkicker { margin-bottom: 2px; }
+    section.lab .backlink { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <p class="kicker">Epoch AI &middot; Frontier-lab compute models</p>
+    <h1>How much compute do frontier AI labs have?</h1>
+    <p class="lede">
+      Estimated total compute rented or used by each lab at the end of the year, in
+      H100&#8209;equivalents, from Epoch&rsquo;s frontier-lab compute Monte Carlo models.
+      Bars show the median estimate; whiskers span the 90% credible interval.
+      <b>Hover or click a bar</b> to see how that estimate is built, step by step.
+      2024 values for Google DeepMind and Meta are backcasts covering the predecessor
+      frontier-AI orgs (Meta Superintelligence Labs did not exist in 2024).
+    </p>
+  </header>
+
+  <section class="card" id="chart-card" aria-label="Frontier lab compute chart">
+    <div class="legend" id="legend"></div>
+    <div class="chart-scroll">
+      <svg id="chart" viewBox="0 0 860 430" role="img"
+           aria-label="Grouped bar chart of frontier lab compute at end of 2023, 2024 and 2025, in H100 equivalents, with 90 percent credible intervals. Each bar links to a walkthrough of its model."></svg>
+    </div>
+    <details class="datatable">
+      <summary>Data table</summary>
+      <div class="table-scroll">
+        <table class="values" id="values-table">
+          <caption>H100-equivalents; 90% credible interval bounds. Snapshots, not flows &mdash; years must not be summed.</caption>
+          <thead>
+            <tr><th scope="col">Lab</th><th scope="col">Year-end</th><th scope="col">5th pct</th><th scope="col">Median</th><th scope="col">95th pct</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </details>
+    <p class="chart-footnote">
+      Estimates are operational-stock snapshots of compute rented or used (not owned) &mdash;
+      consecutive years must not be summed. Missing bars mean &ldquo;no estimate&rdquo;, not zero:
+      Anthropic&rsquo;s end-2024 backcast is not exported, and 2023 covers OpenAI only.
+    </p>
+  </section>
+
+  <section class="walkthrough-head" id="walkthrough">
+    <h2>How each estimate is built</h2>
+    <p>
+      Each estimate &mdash; every lab at end-2025, plus end-2024 backcasts for Google
+      DeepMind and Meta (whose 2024 scope is the predecessor org, Meta&nbsp;AI&thinsp;/&thinsp;GenAI)
+      &mdash; is a Monte Carlo combination of a few sampled inputs. Rows show every quantity
+      in model order: a dot at the median with a whisker spanning the 90% credible interval,
+      grouped by unit onto a shared scale (5,000 samples each). Sampled inputs are priors from
+      <code>lab_model_params.csv</code>; the model structure lives in
+      <code>frontier_lab_compute_model.py</code>. OpenAI&rsquo;s 2023&ndash;24 bars are per-year
+      outputs of the same power model walked through below.
+    </p>
+    <nav class="labs" id="labnav" aria-label="Jump to a model walkthrough"></nav>
+  </section>
+
+  <div id="sections"></div>
+
+  <footer>
+    <span>
+      Source: Epoch AI, frontier-lab compute models &middot; consolidated layout mockup,
+      not a published page &middot; tables:
+      <a href="data/lab_compute_year_end_by_lab.csv">year-end CSV</a> &middot;
+      <a href="data/lab_compute_intermediates_by_lab.csv">intermediates CSV</a> &middot;
+      generated 2026-07-10 18:56
+    </span>
+    <span class="wordmark">EPOCH&thinsp;AI</span>
+  </footer>
+</div>
+
+<div class="tooltip" id="tip-chart" role="tooltip"></div>
+<div class="tooltip" id="tip-step" role="tooltip"></div>
+
+<script>
+// ── Data (injected by build_compute_page.py from generate_tables) ───────────
+const DATA = {"generated": "2026-07-10 18:56", "yearEnd": [{"lab": "OpenAI", "year": 2023, "p5": 65590, "med": 99786, "p95": 135276}, {"lab": "Google DeepMind", "year": 2024, "p5": 215338, "med": 422820, "p95": 779434}, {"lab": "Meta Superintelligence Labs", "year": 2024, "p5": 123668, "med": 247707, "p95": 480076}, {"lab": "OpenAI", "year": 2024, "p5": 257324, "med": 386334, "p95": 491219}, {"lab": "Google DeepMind", "year": 2025, "p5": 1008220, "med": 1583430, "p95": 2548756}, {"lab": "Meta Superintelligence Labs", "year": 2025, "p5": 602331, "med": 987550, "p95": 1628318}, {"lab": "OpenAI", "year": 2025, "p5": 1172961, "med": 1757712, "p95": 2233591}, {"lab": "Anthropic", "year": 2025, "p5": 935688, "med": 1212761, "p95": 1572064}], "labs": [{"lab": "Google DeepMind", "year": 2025, "steps": [{"i": 1, "name": "nvidia_owned", "label": "Google-owned Nvidia fleet", "kind": "input", "units": "H100e", "expression": "", "p5": 948855.0, "med": 1231460.0, "p95": 1582970.0}, {"i": 2, "name": "google_owned", "label": "Google TPU fleet", "kind": "input", "units": "H100e", "expression": "", "p5": 3074100.0, "med": 3730580.0, "p95": 4551760.0}, {"i": 3, "name": "total_owned", "label": "Total owned fleet", "kind": "derived", "units": "H100e", "expression": "nvidia_owned + google_owned", "p5": 4253360.0, "med": 4982250.0, "p95": 5845210.0}, {"i": 4, "name": "deployment_lag", "label": "Operational share of owned", "kind": "input", "units": "ratio", "expression": "", "p5": 0.550819, "med": 0.688648, "p95": 0.876787}, {"i": 5, "name": "operational", "label": "Operational fleet", "kind": "derived", "units": "H100e", "expression": "total_owned \u00d7 deployment_lag", "p5": 2616950.0, "med": 3424010.0, "p95": 4549370.0}, {"i": 6, "name": "cloud_share", "label": "Cloud share of Google ML compute", "kind": "input", "units": "share", "expression": "", "p5": 0.451252, "med": 0.498917, "p95": 0.551786}, {"i": 7, "name": "dm_cloud_share", "label": "DeepMind share of the cloud half", "kind": "input", "units": "share", "expression": "", "p5": 0.200396, "med": 0.34908, "p95": 0.60604}, {"i": 8, "name": "dm_noncloud_share", "label": "DeepMind share of the internal half", "kind": "input", "units": "share", "expression": "", "p5": 0.39818, "med": 0.567133, "p95": 0.805602}, {"i": 9, "name": "dm_fraction", "label": "DeepMind fraction of the operational fleet", "kind": "derived", "units": "share", "expression": "cloud_share \u00d7 dm_cloud_share + (1 \u2212 cloud_share) \u00d7 dm_noncloud_share", "p5": 0.321043, "med": 0.462128, "p95": 0.671083}, {"i": 10, "name": "total_h100e", "label": "DeepMind compute, end-2025", "kind": "final", "units": "H100e", "expression": "operational \u00d7 dm_fraction", "p5": 1008220.0, "med": 1583430.0, "p95": 2548760.0}]}, {"lab": "Google DeepMind", "year": 2024, "steps": [{"i": 1, "name": "nvidia_owned", "label": "Google-owned Nvidia fleet", "kind": "input", "units": "H100e", "expression": "", "p5": 322011.0, "med": 433350.0, "p95": 576842.0}, {"i": 2, "name": "google_owned", "label": "Google TPU fleet", "kind": "input", "units": "H100e", "expression": "", "p5": 682475.0, "med": 922170.0, "p95": 1256560.0}, {"i": 3, "name": "total_owned", "label": "Total owned fleet", "kind": "derived", "units": "H100e", "expression": "nvidia_owned + google_owned", "p5": 1093550.0, "med": 1365440.0, "p95": 1718160.0}, {"i": 4, "name": "lag_quarters_2024", "label": "Deployment lag", "kind": "input", "units": "quarters", "expression": "", "p5": 0.502254, "med": 0.986562, "p95": 2.04754}, {"i": 5, "name": "deployment_lag", "label": "Operational share of owned", "kind": "derived", "units": "ratio", "expression": "owned stock lag_quarters_2024 before end-2024 \u00f7 end-2024 stock", "p5": 0.507029, "med": 0.707502, "p95": 0.85109}, {"i": 6, "name": "operational", "label": "Operational fleet", "kind": "derived", "units": "H100e", "expression": "total_owned \u00d7 deployment_lag", "p5": 654057.0, "med": 965433.0, "p95": 1297450.0}, {"i": 7, "name": "dm_share_2024", "label": "DeepMind share of Google ML compute", "kind": "input", "units": "share", "expression": "", "p5": 0.253831, "med": 0.439837, "p95": 0.763433}, {"i": 8, "name": "total_h100e", "label": "DeepMind compute, end-2024", "kind": "final", "units": "H100e", "expression": "operational \u00d7 dm_share_2024", "p5": 215338.0, "med": 422820.0, "p95": 779434.0}]}, {"lab": "Meta Superintelligence Labs", "year": 2025, "steps": [{"i": 1, "name": "nvidia_owned", "label": "Meta-owned Nvidia fleet", "kind": "input", "units": "H100e", "expression": "", "p5": 1420800.0, "med": 1843640.0, "p95": 2369480.0}, {"i": 2, "name": "amd_owned", "label": "Meta-owned AMD Instinct fleet", "kind": "input", "units": "H100e", "expression": "", "p5": 344024.0, "med": 457897.0, "p95": 614344.0}, {"i": 3, "name": "total_owned", "label": "Total owned fleet", "kind": "derived", "units": "H100e", "expression": "nvidia_owned + amd_owned", "p5": 1869340.0, "med": 2306660.0, "p95": 2842790.0}, {"i": 4, "name": "deployment_lag", "label": "Operational share of owned", "kind": "input", "units": "ratio", "expression": "", "p5": 0.62075, "med": 0.744282, "p95": 0.905701}, {"i": 5, "name": "operational", "label": "Operational fleet", "kind": "derived", "units": "H100e", "expression": "total_owned \u00d7 deployment_lag", "p5": 1312570.0, "med": 1719430.0, "p95": 2292590.0}, {"i": 6, "name": "msl_share", "label": "MSL share vs core-business recommenders", "kind": "input", "units": "share", "expression": "", "p5": 0.33407, "med": 0.520326, "p95": 0.811529}, {"i": 7, "name": "msl_owned", "label": "MSL slice of the owned fleet", "kind": "derived", "units": "H100e", "expression": "operational \u00d7 msl_share", "p5": 530972.0, "med": 892052.0, "p95": 1515510.0}, {"i": 8, "name": "cloud_spend", "label": "Cloud rental spend run rate", "kind": "input", "units": "USD B/yr", "expression": "", "p5": 0.0, "med": 1.06408, "p95": 3.25585}, {"i": 9, "name": "rental_price", "label": "Rental price per H100e-hour", "kind": "input", "units": "USD/H100e-hr", "expression": "", "p5": 1.32192, "med": 1.4459, "p95": 1.58467}, {"i": 10, "name": "rented_h100e", "label": "Rented cloud compute", "kind": "derived", "units": "H100e", "expression": "cloud_spend \u00f7 (rental_price \u00d7 8760 h)", "p5": 0.0, "med": 84321.8, "p95": 258147.0}, {"i": 11, "name": "total_h100e", "label": "MSL compute, end-2025", "kind": "final", "units": "H100e", "expression": "msl_owned + rented_h100e", "p5": 602331.0, "med": 987550.0, "p95": 1628320.0}]}, {"lab": "Meta Superintelligence Labs", "year": 2024, "steps": [{"i": 1, "name": "nvidia_owned", "label": "Meta-owned Nvidia fleet", "kind": "input", "units": "H100e", "expression": "", "p5": 447534.0, "med": 603095.0, "p95": 803850.0}, {"i": 2, "name": "amd_all_owners", "label": "AMD Instinct fleet, all owners", "kind": "input", "units": "H100e", "expression": "", "p5": 441053.0, "med": 543701.0, "p95": 674164.0}, {"i": 3, "name": "meta_amd_share_2024", "label": "Meta share of the AMD fleet", "kind": "input", "units": "share", "expression": "", "p5": 0.300591, "med": 0.403806, "p95": 0.555678}, {"i": 4, "name": "amd_owned", "label": "Meta-owned AMD Instinct fleet", "kind": "derived", "units": "H100e", "expression": "amd_all_owners \u00d7 meta_amd_share_2024", "p5": 152218.0, "med": 220094.0, "p95": 319617.0}, {"i": 5, "name": "total_owned", "label": "Total owned fleet", "kind": "derived", "units": "H100e", "expression": "nvidia_owned + amd_owned", "p5": 658335.0, "med": 829102.0, "p95": 1051500.0}, {"i": 6, "name": "lag_quarters_2024", "label": "Deployment lag", "kind": "input", "units": "quarters", "expression": "", "p5": 0.509687, "med": 1.01993, "p95": 2.04531}, {"i": 7, "name": "deployment_lag", "label": "Operational share of owned", "kind": "derived", "units": "ratio", "expression": "owned stock lag_quarters_2024 before end-2024 \u00f7 end-2024 stock", "p5": 0.465749, "med": 0.678407, "p95": 0.838622}, {"i": 8, "name": "operational", "label": "Operational fleet", "kind": "derived", "units": "H100e", "expression": "total_owned \u00d7 deployment_lag", "p5": 368195.0, "med": 561984.0, "p95": 778289.0}, {"i": 9, "name": "meta_ai_share_2024", "label": "Meta AI (pre-MSL) frontier share", "kind": "input", "units": "share", "expression": "", "p5": 0.250524, "med": 0.450864, "p95": 0.808529}, {"i": 10, "name": "total_h100e", "label": "Meta AI frontier compute, end-2024", "kind": "final", "units": "H100e", "expression": "operational \u00d7 meta_ai_share_2024", "p5": 123668.0, "med": 247707.0, "p95": 480076.0}]}, {"lab": "OpenAI", "year": 2025, "steps": [{"i": 1, "name": "disclosed_power", "label": "Disclosed end-2025 power", "kind": "constant", "units": "MW", "expression": "", "p5": 1900.0, "med": 1900.0, "p95": 1900.0}, {"i": 2, "name": "definition_factor", "label": "Power-definition factor (IT vs gross)", "kind": "input", "units": "ratio", "expression": "mixture(if_it_power, 1 / gross_pue; p_gross)", "p5": 0.673839, "med": 0.989406, "p95": 1.04769}, {"i": 3, "name": "accuracy_factor", "label": "Figure-accuracy factor", "kind": "input", "units": "ratio", "expression": "", "p5": 0.89968, "med": 1.0354, "p95": 1.19862}, {"i": 4, "name": "total_power", "label": "Modelled end-2025 IT power", "kind": "derived", "units": "MW", "expression": "(disclosed_power + rounding jitter) \u00d7 definition_factor \u00d7 accuracy_factor", "p5": 1305.38, "med": 1913.42, "p95": 2274.42}, {"i": 5, "name": "new_chip_share", "label": "Fleet share on the newest chip mix", "kind": "input", "units": "share", "expression": "", "p5": 0.0536779, "med": 0.225438, "p95": 0.509706}, {"i": 6, "name": "lag_quarters", "label": "Deployment lag behind Microsoft's mix", "kind": "input", "units": "quarters", "expression": "", "p5": 0.501249, "med": 1.01038, "p95": 2.02544}, {"i": 7, "name": "it_overhead", "label": "Server-to-IT power overhead", "kind": "input", "units": "ratio", "expression": "", "p5": 1.0, "med": 1.14137, "p95": 1.35397}, {"i": 8, "name": "a100_count", "label": "A100 chips", "kind": "derived", "units": "chips", "expression": "total_power \u00d7 mix share \u00f7 (server watts \u00d7 it_overhead)", "p5": 47010.9, "med": 84012.1, "p95": 131631.0}, {"i": 9, "name": "h100_h200_count", "label": "H100/H200 chips", "kind": "derived", "units": "chips", "expression": "total_power \u00d7 mix share \u00f7 (server watts \u00d7 it_overhead)", "p5": 363389.0, "med": 561505.0, "p95": 802594.0}, {"i": 10, "name": "b200_count", "label": "B200 chips", "kind": "derived", "units": "chips", "expression": "total_power \u00d7 mix share \u00f7 (server watts \u00d7 it_overhead)", "p5": 206010.0, "med": 313984.0, "p95": 406787.0}, {"i": 11, "name": "b300_count", "label": "B300 chips", "kind": "derived", "units": "chips", "expression": "total_power \u00d7 mix share \u00f7 (server watts \u00d7 it_overhead)", "p5": 47186.7, "med": 141969.0, "p95": 224685.0}, {"i": 12, "name": "total_h100e", "label": "OpenAI compute, end-2025", "kind": "final", "units": "H100e", "expression": "\u03a3 chip count \u00d7 H100e per chip", "p5": 1172960.0, "med": 1757710.0, "p95": 2233590.0}]}, {"lab": "Anthropic", "year": 2025, "steps": [{"i": 1, "name": "power_mw", "label": "Total IT power", "kind": "input", "units": "MW", "expression": "lab_power_gw \u00d7 1000", "p5": 1081.98, "med": 1399.11, "p95": 1792.15}, {"i": 2, "name": "trainium_share", "label": "Trainium2 share of IT power", "kind": "input", "units": "share", "expression": "", "p5": 0.34827, "med": 0.522866, "p95": 0.702334}, {"i": 3, "name": "trainium2_per_mw", "label": "Trainium2 fleet efficiency", "kind": "constant", "units": "H100e/MW", "expression": "", "p5": 753.769, "med": 753.769, "p95": 753.769}, {"i": 4, "name": "nontrainium_per_mw", "label": "Nvidia + TPU fleet efficiency", "kind": "constant", "units": "H100e/MW", "expression": "", "p5": 993.489, "med": 993.489, "p95": 993.489}, {"i": 5, "name": "blended_per_mw", "label": "Blended fleet efficiency", "kind": "derived", "units": "H100e/MW", "expression": "trainium_share \u00d7 trainium2_per_mw + (1 \u2212 trainium_share) \u00d7 nontrainium_per_mw", "p5": 825.125, "med": 868.147, "p95": 910.002}, {"i": 6, "name": "total_h100e", "label": "Anthropic compute, end-2025", "kind": "final", "units": "H100e", "expression": "power_mw \u00d7 blended_per_mw", "p5": 935688.0, "med": 1212760.0, "p95": 1572060.0}]}]};
+const YEAR_END = DATA.yearEnd;
+
+// Fixed lab order: sets legend order and bar order within a year group.
+// Color follows the lab everywhere, via the CSS custom properties above.
+const LAB_ORDER = ['OpenAI', 'Google DeepMind', 'Anthropic', 'Meta Superintelligence Labs'];
+const slug = lab => lab.toLowerCase().replace(/[^a-z]+/g, '-');
+
+// Walkthrough section ids that actually exist, e.g. "openai-2025".
+const SECTION_IDS = new Set(DATA.labs.map(e => `${slug(e.lab)}-${e.year}`));
+// A bar's walkthrough target: its own (lab, year) section if present, else the
+// lab's end-2025 section (OpenAI 2023-24 come from the same per-year model).
+function walkthroughTarget(lab, year) {
+  const own = `${slug(lab)}-${year}`;
+  return SECTION_IDS.has(own) ? { id: own, sameYear: true }
+                              : { id: `${slug(lab)}-2025`, sameYear: false };
+}
+const BACKCAST_NOTE = {
+  'google-deepmind-2024': 'End-2024 backcast',
+  'meta-superintelligence-labs-2024': 'End-2024 backcast · Meta AI / GenAI scope',
+};
+
+// ── Formatting ──────────────────────────────────────────────────────────────
+const fmtH100e = v => v >= 1e6 ? (v / 1e6).toFixed(2).replace(/0$/, '') + 'M'
+                               : Math.round(v / 1e3) + 'k';
+function fmtBig(v) {
+  if (Math.abs(v) >= 1e6) { const m = v / 1e6; return (m >= 10 ? m.toFixed(1) : m.toFixed(2)) + 'M'; }
+  if (Math.abs(v) >= 1e3) return Math.round(v / 1e3) + 'k';
+  return String(Math.round(v));
+}
+function fmtVal(units, v) {
+  switch (units) {
+    case 'H100e':
+    case 'chips':        return fmtBig(v);
+    case 'MW':           return Math.round(v).toLocaleString('en-US') + ' MW';
+    case 'share':        return (v * 100).toFixed(v * 100 < 10 ? 1 : 0) + '%';
+    case 'ratio':        return v.toFixed(2) + '×';
+    case 'quarters':     return v.toFixed(1) + 'q';
+    case 'USD B/yr':     return '$' + v.toFixed(2) + 'B/yr';
+    case 'USD/H100e-hr': return '$' + v.toFixed(2) + '/hr';
+    case 'H100e/MW':     return Math.round(v).toLocaleString('en-US');
+    default:             return fmtBig(v);
+  }
+}
+
+// ── Legend + data table ─────────────────────────────────────────────────────
+const legend = document.getElementById('legend');
+for (const lab of LAB_ORDER) {
+  const item = document.createElement('span');
+  item.className = 'legend-item';
+  item.innerHTML = `<span class="swatch bg-${slug(lab)}"></span>${lab}`;
+  legend.appendChild(item);
+}
+const tbody = document.querySelector('#values-table tbody');
+for (const lab of LAB_ORDER) {
+  for (const d of YEAR_END.filter(r => r.lab === lab).sort((a, b) => a.year - b.year)) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${d.lab}</td><td>${d.year}</td>` +
+      [d.p5, d.med, d.p95].map(v => `<td>${Math.round(v).toLocaleString('en-US')}</td>`).join('');
+    tbody.appendChild(tr);
+  }
+}
+
+// ── Chart ───────────────────────────────────────────────────────────────────
+const YEARS = [...new Set(YEAR_END.map(d => d.year))].sort();
+const Y_MAX = 3e6;
+const TICKS = [0, 0.5e6, 1e6, 1.5e6, 2e6, 2.5e6, 3e6];
+const W = 860, H = 430;
+const M = { l: 64, r: 14, t: 18, b: 46 };
+const plotW = W - M.l - M.r, plotH = H - M.t - M.b;
+const y = v => M.t + plotH * (1 - v / Y_MAX);
+
+const svg = document.getElementById('chart');
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, text) => {
+  const node = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (text != null) node.textContent = text;
+  svg.appendChild(node);
+  return node;
+};
+
+for (const t of TICKS) {
+  el('line', { class: 'gridline' + (t === 0 ? ' zero' : ''),
+               x1: M.l, x2: W - M.r, y1: y(t), y2: y(t) });
+  el('text', { class: 'tick-label', x: M.l - 9, y: y(t) + 4, 'text-anchor': 'end' },
+     t === 0 ? '0' : (t / 1e6) + 'M');
+}
+const yMid = M.t + plotH / 2;
+el('text', { class: 'axis-title', x: 16, y: yMid, 'text-anchor': 'middle',
+             transform: `rotate(-90 16 ${yMid})` }, 'H100 equivalents');
+
+// ── Chart tooltip: anchored to the bar and hoverable, so its link is usable ─
+const tipChart = document.getElementById('tip-chart');
+let tipHideTimer = null;
+function showChartTip(d, bar) {
+  clearTimeout(tipHideTimer);
+  const target = walkthroughTarget(d.lab, d.year);
+  const note = BACKCAST_NOTE[`${slug(d.lab)}-${d.year}`];
+  tipChart.innerHTML =
+    `<span class="swatch bg-${slug(d.lab)}" style="display:inline-block;margin-right:6px"></span>` +
+    `<b>${d.lab}</b><br>` +
+    `<span class="muted">End of ${d.year}${note ? ' · ' + note.replace('End-2024 backcast', 'backcast') : ''}</span><br>` +
+    `Median: ${fmtH100e(d.med)} H100e<br>` +
+    `<span class="muted">90% CI ${fmtH100e(d.p5)} – ${fmtH100e(d.p95)}</span><br>` +
+    `<a class="tip-link" href="#${target.id}">` +
+    (target.sameYear ? 'How this estimate is built ↓'
+                     : 'OpenAI model walkthrough ↓') + '</a>';
+  tipChart.style.display = 'block';
+  const r = bar.getBoundingClientRect(), t = tipChart.getBoundingClientRect();
+  let left = r.left + r.width / 2 - t.width / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - t.width - 8));
+  let top = r.top - t.height - 10;
+  if (top < 8) top = r.bottom + 10;
+  tipChart.style.left = left + 'px';
+  tipChart.style.top = top + 'px';
+}
+function scheduleChartTipHide() {
+  clearTimeout(tipHideTimer);
+  tipHideTimer = setTimeout(() => { tipChart.style.display = 'none'; }, 250);
+}
+tipChart.addEventListener('mouseenter', () => clearTimeout(tipHideTimer));
+tipChart.addEventListener('mouseleave', scheduleChartTipHide);
+tipChart.addEventListener('click', e => {
+  if (e.target.closest('a')) tipChart.style.display = 'none';
+});
+
+const groupW = plotW / YEARS.length;
+const BAR_W = 42, GAP = 10;
+YEARS.forEach((year, gi) => {
+  const rows = LAB_ORDER
+    .map(lab => YEAR_END.find(d => d.lab === lab && d.year === year))
+    .filter(Boolean);
+  const totalW = rows.length * BAR_W + (rows.length - 1) * GAP;
+  const x0 = M.l + gi * groupW + (groupW - totalW) / 2;
+
+  rows.forEach((d, i) => {
+    const x = x0 + i * (BAR_W + GAP);
+    const cx = x + BAR_W / 2;
+    const target = walkthroughTarget(d.lab, d.year);
+
+    const bar = el('rect', {
+      class: `bar lab-${slug(d.lab)}`, tabindex: 0, role: 'link',
+      'aria-label': `${d.lab}, end of ${d.year}: median ${fmtH100e(d.med)} H100 equivalents, ` +
+        `90% CI ${fmtH100e(d.p5)} to ${fmtH100e(d.p95)}. View model walkthrough.`,
+      x, y: y(d.med), width: BAR_W, height: y(0) - y(d.med),
+    });
+    const go = () => {
+      tipChart.style.display = 'none';
+      const section = document.getElementById(target.id);
+      history.pushState(null, '', '#' + target.id);
+      section.scrollIntoView();
+      section.focus({ preventScroll: true });
+    };
+    bar.addEventListener('mouseenter', () => showChartTip(d, bar));
+    bar.addEventListener('mouseleave', scheduleChartTipHide);
+    bar.addEventListener('click', go);
+    bar.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+    });
+    bar.addEventListener('focus', () => { bar.classList.add('focused'); showChartTip(d, bar); });
+    bar.addEventListener('blur', () => { bar.classList.remove('focused'); scheduleChartTipHide(); });
+
+    el('line', { class: 'whisk', x1: cx, x2: cx, y1: y(d.p5), y2: y(d.p95) });
+    for (const v of [d.p5, d.p95]) {
+      el('line', { class: 'whisk', x1: cx - 6, x2: cx + 6, y1: y(v), y2: y(v) });
+    }
+    el('text', { class: 'bar-value', x: cx, y: y(d.p95) - 8, 'text-anchor': 'middle' },
+       fmtH100e(d.med));
+  });
+
+  el('text', { class: 'year-label', x: M.l + gi * groupW + groupW / 2, y: H - 20,
+               'text-anchor': 'middle' }, year);
+});
+
+// ── Walkthrough sections ────────────────────────────────────────────────────
+const FACTOR_UNITS = new Set(['share', 'ratio', 'quarters']);
+const family = u => FACTOR_UNITS.has(u) ? 'factor' : u;
+const FAMILY_TITLES = {
+  'H100e':        'H100 equivalents',
+  'factor':       'Adjustment factors (shares, ratios)',
+  'MW':           'IT power',
+  'chips':        'Chip counts',
+  'USD B/yr':     'Cloud rental spend',
+  'USD/H100e-hr': 'Rental price',
+  'H100e/MW':     'Fleet efficiency (H100e per MW)',
+};
+const TICK_SUFFIX = { 'H100e': ' H100e', 'chips': ' chips', 'MW': ' MW',
+                      'USD B/yr': 'B/yr', 'USD/H100e-hr': '/hr',
+                      'H100e/MW': ' H100e/MW' };
+function fmtTick(axis, fam, v, isLast) {
+  if (v === 0) return '0';
+  if (axis.percent) return Math.round(v * 100) + '%';
+  let num;
+  if (v >= 1e6) num = parseFloat((v / 1e6).toFixed(2)) + 'M';
+  else if (v >= 1e4) num = parseFloat((v / 1e3).toFixed(1)) + 'k';
+  else num = (+v.toFixed(2)).toLocaleString('en-US');
+  if (fam === 'USD B/yr' || fam === 'USD/H100e-hr') num = '$' + num;
+  return isLast ? num + (TICK_SUFFIX[fam] ?? '') : num;
+}
+
+const tipStep = document.getElementById('tip-step');
+function showStepTip(html, x, yPos) {
+  tipStep.innerHTML = html;
+  tipStep.style.display = 'block';
+  const r = tipStep.getBoundingClientRect();
+  tipStep.style.left = Math.min(x + 12, window.innerWidth - r.width - 8) + 'px';
+  tipStep.style.top = Math.max(yPos - r.height - 10, 8) + 'px';
+}
+const hideStepTip = () => { tipStep.style.display = 'none'; };
+
+function groupSteps(steps) {
+  const groups = [];
+  for (const step of steps) {
+    const fam = family(step.units);
+    const last = groups[groups.length - 1];
+    if (last && last.fam === fam) last.steps.push(step);
+    else groups.push({ fam, steps: [step] });
+  }
+  return groups;
+}
+function niceCeil(v) {
+  const e = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8]) {
+    if (m * e >= v - 1e-9) return m * e;
+  }
+  return 10 * e;
+}
+const SEGMENTS = { 1: 4, 1.2: 3, 1.5: 3, 2: 4, 2.5: 5, 3: 3, 4: 4, 5: 5, 6: 3, 8: 4 };
+function axisFor(rawMax, fam) {
+  const percent = fam === 'factor' && rawMax <= 1.0;
+  const max = percent ? 1.0 : niceCeil(rawMax * 1.02);
+  const mantissa = +(max / Math.pow(10, Math.floor(Math.log10(max)))).toFixed(2);
+  const n = SEGMENTS[mantissa] ?? 4;
+  const ticks = Array.from({ length: n + 1 }, (_, i) => max * i / n);
+  return { max, ticks, percent };
+}
+function familyAxes(steps) {
+  const rawMax = {};
+  for (const s of steps) {
+    const fam = family(s.units);
+    rawMax[fam] = Math.max(rawMax[fam] ?? 0, s.p95);
+  }
+  return Object.fromEntries(Object.entries(rawMax).map(([fam, m]) => [fam, axisFor(m, fam)]));
+}
+
+function trackCell(step, axis) {
+  const track = document.createElement('div');
+  track.className = 'track';
+  const pct = v => Math.min(v / axis.max * 100, 100).toFixed(2) + '%';
+
+  for (const t of axis.ticks) {
+    if (t === 0 || t === axis.max) continue;
+    const tick = document.createElement('div');
+    tick.className = 'tick';
+    tick.style.left = pct(t);
+    track.appendChild(tick);
+  }
+  const rail = document.createElement('div');
+  rail.className = 'rail';
+  track.appendChild(rail);
+
+  const isConst = step.kind === 'constant';
+  if (!isConst) {
+    const ci = document.createElement('div');
+    ci.className = 'ci';
+    ci.style.left = pct(step.p5);
+    ci.style.width = Math.max((step.p95 - step.p5) / axis.max * 100, 0).toFixed(2) + '%';
+    track.appendChild(ci);
+    for (const v of [step.p5, step.p95]) {
+      const cap = document.createElement('div');
+      cap.className = 'cap';
+      cap.style.left = pct(v);
+      track.appendChild(cap);
+    }
+  }
+  const dot = document.createElement('div');
+  dot.className = 'dot';
+  dot.style.left = pct(step.med);
+  track.appendChild(dot);
+
+  track.addEventListener('mousemove', e => {
+    const body = isConst
+      ? `<b>${fmtVal(step.units, step.med)}</b> <span class="muted">(fixed value)</span>`
+      : `median <b>${fmtVal(step.units, step.med)}</b><br>` +
+        `<span class="muted">90% CI ${fmtVal(step.units, step.p5)} &ndash; ` +
+        `${fmtVal(step.units, step.p95)}</span>`;
+    const expr = step.expression ? `<br><span class="muted">= ${step.expression}</span>` : '';
+    showStepTip(`<b>${step.label}</b><br>${body}${expr}`, e.clientX, e.clientY);
+  });
+  track.addEventListener('mouseleave', hideStepTip);
+  return track;
+}
+
+function stepRow(step, axis) {
+  const row = document.createElement('div');
+  row.className = 'row' + (step.kind === 'final' ? ' final' : '');
+
+  const lbl = document.createElement('div');
+  lbl.className = 'lbl';
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = `${step.i} · ${step.kind}`;
+  lbl.appendChild(meta);
+  const name = document.createElement('div');
+  name.className = 'name';
+  name.textContent = step.label;
+  lbl.appendChild(name);
+  if (step.expression) {
+    const expr = document.createElement('div');
+    expr.className = 'expr';
+    expr.textContent = '= ' + step.expression;
+    lbl.appendChild(expr);
+  }
+  row.appendChild(lbl);
+  row.appendChild(trackCell(step, axis));
+
+  const val = document.createElement('div');
+  val.className = 'val';
+  val.innerHTML = step.kind === 'constant'
+    ? `<b>${fmtVal(step.units, step.med)}</b> (fixed)`
+    : `${fmtVal(step.units, step.p5)}&ndash;${fmtVal(step.units, step.p95)} · ` +
+      `<b>${fmtVal(step.units, step.med)}</b>`;
+  row.appendChild(val);
+  return row;
+}
+
+const nav = document.getElementById('labnav');
+const sections = document.getElementById('sections');
+for (const entry of DATA.labs) {
+  const id = `${slug(entry.lab)}-${entry.year}`;
+  const labSlug = slug(entry.lab);
+
+  const link = document.createElement('a');
+  link.href = '#' + id;
+  link.innerHTML = `<span class="swatch bg-${labSlug}"></span>${entry.lab} &middot; end-${entry.year}`;
+  nav.appendChild(link);
+
+  const section = document.createElement('section');
+  section.className = `card lab sec-${labSlug}`;
+  section.id = id;
+  section.tabIndex = -1;
+
+  const final = entry.steps.find(s => s.kind === 'final');
+  const note = BACKCAST_NOTE[id];
+  const header = document.createElement('header');
+  header.innerHTML =
+    `<span class="swatch bg-${labSlug}"></span>` +
+    `<h3>${entry.lab}</h3>` +
+    (final ? `<span class="headline">end-${entry.year}: <b>${fmtVal('H100e', final.med)}</b>` +
+             ` H100e (90% CI ${fmtVal('H100e', final.p5)}&ndash;${fmtVal('H100e', final.p95)})</span>`
+           : '') +
+    (note ? `<span class="badge">${note}</span>` : '') +
+    `<a class="backlink" href="#chart-card">↑ back to chart</a>`;
+  section.appendChild(header);
+
+  const axes = familyAxes(entry.steps);
+  for (const group of groupSteps(entry.steps)) {
+    const axis = axes[group.fam];
+    const div = document.createElement('div');
+    div.className = 'group';
+
+    const ghead = document.createElement('div');
+    ghead.className = 'ghead';
+    ghead.innerHTML = `<span class="gkicker">${FAMILY_TITLES[group.fam] ?? group.fam}</span>`;
+    div.appendChild(ghead);
+
+    for (const step of group.steps) div.appendChild(stepRow(step, axis));
+
+    const gfoot = document.createElement('div');
+    gfoot.className = 'gfoot';
+    const axisrow = document.createElement('div');
+    axisrow.className = 'axisrow';
+    axis.ticks.forEach((t, ti) => {
+      const isLast = ti === axis.ticks.length - 1;
+      const left = (t / axis.max * 100).toFixed(2) + '%';
+      const stub = document.createElement('div');
+      stub.className = 'stub';
+      stub.style.left = left;
+      axisrow.appendChild(stub);
+      const label = document.createElement('span');
+      label.className = 'tlabel';
+      label.style.left = left;
+      if (ti === 0) label.style.transform = 'translateX(0)';
+      if (isLast) label.style.transform = 'translateX(-100%)';
+      label.textContent = fmtTick(axis, group.fam, t, isLast);
+      axisrow.appendChild(label);
+    });
+    gfoot.appendChild(document.createElement('span'));
+    gfoot.appendChild(axisrow);
+    gfoot.appendChild(document.createElement('span'));
+    div.appendChild(gfoot);
+
+    section.appendChild(div);
+  }
+  sections.appendChild(section);
+}
+</script>
+</body>
+</html>

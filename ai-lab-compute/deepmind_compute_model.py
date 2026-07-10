@@ -422,13 +422,10 @@ plt.show()
 # ## Sensitivity check: correlating the two DeepMind shares
 #
 # In the base case the cloud and non-cloud DeepMind shares are drawn
-# **independently**. But the dominant uncertainty in both is really the same
-# question — *what counts as DeepMind compute* (research org only? all first-party
-# Gemini serving? Search-AI too?). A broad reading pushes **both** shares up
-# together, which argues for a **positive correlation** between them.
+# **independently**. But intuitively, they may be positively correlated.
 #
 # Sampling them independently lets a high cloud share offset a low non-cloud share
-# (and vice versa), which artificially narrows the tails of the DeepMind total.
+# (and vice versa), which narrows the tails of the DeepMind total.
 # Here we re-run the model across a range of correlations, reusing the *same*
 # cloud-share and operational draws so the only thing that changes is the
 # dependence between the two DeepMind shares. As correlation rises, the DeepMind
@@ -437,6 +434,11 @@ plt.show()
 # A **modest positive correlation (~0.5)** is the most plausible case; the 0.9/0.99
 # rows are upper bounds and the -0.9 row is a sanity check (anticorrelation should
 # narrow the CI).
+#
+# Alongside the H100e total we also report **DeepMind's share of overall Google
+# compute** (the blended fraction, before multiplying by the fleet). Because the
+# fleet size cancels out of that fraction, it isolates exactly what the correlation
+# moves: the median share holds roughly flat while its 90% CI widens with rho.
 
 # %%
 # sq.correlate requires |rho| < 1 strictly, so use 0.99 for the near-perfect case.
@@ -452,20 +454,26 @@ for rho in correlations:
     a, b = sq.correlate((fresh["dm_cloud_share"], fresh["dm_noncloud_share"]), rho)
     dmc, dmn = a @ N_SAMPLES, b @ N_SAMPLES
     # Reuse baseline cloud-share and operational draws so only the dependence changes.
+    # frac is DeepMind's share of overall (operational) Google compute; the fleet
+    # size cancels out of it, so it isolates what the correlation actually moves.
     frac = cloud_share_samples * dmc + (1 - cloud_share_samples) * dmn
     dm = operational * frac
     pc = sq.get_percentiles(dm, percentiles=[5, 50, 95])
-    rows.append((rho, pc[5], pc[50], pc[95], pc[95] - pc[5]))
+    sc = sq.get_percentiles(frac, percentiles=[5, 50, 95])
+    rows.append((rho, pc[5], pc[50], pc[95], pc[95] - pc[5], sc[5], sc[50], sc[95]))
 
-print(f"{'corr':>5}  {'5th':>8}  {'median':>8}  {'95th':>8}  {'90% CI width':>13}")
-for rho, lo, med, hi, w in rows:
-    print(f"{rho:>5.2f}  {fmt(lo):>8}  {fmt(med):>8}  {fmt(hi):>8}  {fmt(w):>13}")
-base_w = next(w for rho, _, _, _, w in rows if rho == 0.0)  # the independent case
+print(f"{'corr':>5}  {'5th':>8}  {'median':>8}  {'95th':>8}  {'90% CI width':>13}"
+      f"  {'DM share of Google (5th/median/95th)':>38}")
+for rho, lo, med, hi, w, slo, smed, shi in rows:
+    share_str = f"{slo:.0%} / {smed:.0%} / {shi:.0%}"
+    print(f"{rho:>5.2f}  {fmt(lo):>8}  {fmt(med):>8}  {fmt(hi):>8}  {fmt(w):>13}  {share_str:>38}")
+base_w = next(r[4] for r in rows if r[0] == 0.0)  # the independent case
 print(f"\n90% CI width at corr=0.99 is {rows[-1][4] / base_w - 1:+.0%} vs corr=0 "
       f"(independent): {fmt(base_w)} → {fmt(rows[-1][4])}.")
 mid = next(r for r in rows if r[0] == 0.5)  # the plausible central assumption
 print(f"Plausible case: corr=0.5 gives median {fmt(mid[2])}, 90% CI {fmt(mid[1])}-{fmt(mid[3])} "
-      f"(width {fmt(mid[4])}, {mid[4] / base_w - 1:+.0%} vs independent).")
+      f"(width {fmt(mid[4])}, {mid[4] / base_w - 1:+.0%} vs independent); "
+      f"DeepMind share of Google compute {mid[6]:.0%} (90% CI {mid[5]:.0%}-{mid[7]:.0%}).")
 neg = rows[0]  # the -0.9 sanity-check row
 print(f"Sanity check: corr={neg[0]:.1f} gives width {fmt(neg[4])} "
       f"({neg[4] / base_w - 1:+.0%} vs independent) — anticorrelation narrows it.")
@@ -474,15 +482,30 @@ rhos = [r[0] for r in rows]
 los = np.array([r[1] for r in rows]) / 1e6
 meds = np.array([r[2] for r in rows]) / 1e6
 his = np.array([r[3] for r in rows]) / 1e6
+share_los = np.array([r[5] for r in rows]) * 100
+share_meds = np.array([r[6] for r in rows]) * 100
+share_his = np.array([r[7] for r in rows]) * 100
 
-fig, ax = plt.subplots(figsize=(9, 5))
+# Two panels: the DeepMind H100e total (left) and DeepMind's share of overall
+# Google compute (right). The fleet cancels out of the share, so the right panel
+# shows the correlation's effect in isolation — same median, widening tails.
+fig, (ax, ax2) = plt.subplots(1, 2, figsize=(13, 5))
 ax.fill_between(rhos, los, his, color="#7AC4C0", alpha=0.30, label="90% CI")
 ax.plot(rhos, his, "--", color="#2B5F5C", lw=1)
 ax.plot(rhos, los, "--", color="#2B5F5C", lw=1)
 ax.plot(rhos, meds, "o-", color="#1d4240", lw=2, label="median")
 ax.set_xlabel("correlation between DeepMind cloud & non-cloud shares")
 ax.set_ylabel("DeepMind H100e (millions)")
-ax.set_title("Sensitivity: DeepMind compute vs. correlation of the two shares",
-             weight="bold")
+ax.set_title("DeepMind compute vs. correlation of the two shares", weight="bold")
 ax.legend()
+
+ax2.fill_between(rhos, share_los, share_his, color="#C9A0DC", alpha=0.30, label="90% CI")
+ax2.plot(rhos, share_his, "--", color="#5B3A7E", lw=1)
+ax2.plot(rhos, share_los, "--", color="#5B3A7E", lw=1)
+ax2.plot(rhos, share_meds, "o-", color="#3F2A5C", lw=2, label="median")
+ax2.set_xlabel("correlation between DeepMind cloud & non-cloud shares")
+ax2.set_ylabel("DeepMind share of overall Google compute (%)")
+ax2.set_title("DeepMind share of Google compute vs. correlation", weight="bold")
+ax2.legend()
+fig.tight_layout()
 plt.show()
